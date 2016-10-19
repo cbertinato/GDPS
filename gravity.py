@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from ConfigParser import SafeConfigParser
 import datetime
+import os
 
 class Gravity:
 	# TO DO: Setup exceptions for this class.
@@ -93,57 +94,41 @@ class Gravity:
 			raise Error(errors)
 
 	def read_ZLS_format_file(self, filepath):
-		col_list = ['datetime', 'gravity', 'spring_tension', \
-			'cross_coupling', 'raw_beam', 'vcc', 'al', 'ax', 've2', 'ax2', \
-			'xacc2', 'lacc2', 'xacc', 'lacc', 'par_port', 'platform_period']
+		col_names = ['line_name', 'year', 'day', 'hour', 'minute', 'second',\
+			'gravity', 'spring_tension', 'cross_coupling', 'raw_beam', 'vcc', \
+			'al', 'ax', 've2', 'ax2', 'xacc2', 'lacc2', 'xacc', 'lacc', \
+			'par_port', 'platform_period']
 
-		df = pd.DataFrame()
+		col_subset = ['gravity', 'spring_tension', 'cross_coupling', \
+			'raw_beam', 'vcc', 'al', 'ax', 've2', 'ax2', 'xacc2', 'lacc2', \
+			'xacc', 'lacc', 'par_port', 'platform_period']
 
-		with open(filepath) as filehandle:
-			for index, line in enumerate(filehandle):
-				line_name = line[0:10].strip()
+		col_widths = [10, 4, 3, 2, 2, 2, 8, 8, 7, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 6]
 
-				year = int(line[10:14])
-				jday = int(line[14:17])
-				h = int(line[17:19])
-				m = int(line[19:21])
-				s = int(line[21:23])
+		time_columns = ['year','day','hour','minute','second']
 
+		df = pd.read_fwf(filepath, widths=col_widths, names=col_names)
 
-				# TO DO: Check whether days are zero-padded.
-				# TO DO: Check whether day starts at 0 or 1.
-				dt = datetime.datetime(year, 1, 1) + \
-					datetime.timedelta(jday, seconds=s, minutes=m, hours=h)
+		day_fmt = lambda x: '{:03d}'.format(x)
+		time_fmt = lambda x: '{:02d}'.format(x)
 
-				gravity = np.float64(line[23:31])
-				st = np.float64(line[31:39])
-				cc = np.float64(line[39:46])
-				raw_beam = np.float64(line[46:54])
-				vcc = np.int32(line[54:61])
-				al = np.int32(line[62:69])
-				ax = np.int32(line[70:77])
-				ve2 = np.int32(line[78:85])
-				ax2 = np.int32(line[86:93])
-				xacc2 = np.int32(line[94:101])
-				lacc2 = np.int32(line[102:109])
-				xacc = np.int32(line[110:117])
-				lacc = np.int32(line[118:125])
-				par_port = line[126:134]
-				platform_period = np.int32(line[134:139])
+		t = df['year'].map(str) + df['day'].map(day_fmt) + \
+			df['hour'].map(time_fmt) + df['minute'].map(time_fmt) + \
+			df['second'].map(time_fmt)
 
-				row = pd.DataFrame([[dt, gravity, st, cc, raw_beam, vcc, al, \
-					ax, ve2, ax2, xacc2, lacc2, xacc, lacc, par_port, \
-					platform_period]], columns=col_list)
+		df.index = pd.to_datetime(t, format='%Y%j%H%M%S')
 
-				df = df.append(row)
-
-		df = df.set_index('datetime')
 		return df
 
-	def import_data_DGS_format(self, filepath, filterdelay):
+	def import_ZLS_format_data(self, filepath, begin_time=None, end_time=None):
+		# list files in directory
+		# if begin_time and/or end_time are specified, filter files
+		# read each file and concatenate the resulting dataframes
+		print "import_data_ZLS_format"
+
+	def import_DGS_format_data(self, filepath, filterdelay):
 		# TO DO: Evaluate whether to apply filter delay here.
 		# TO DO: Is filter delay specified in meter config?
-		print "Importing gravity data from %s." % filepath
 
 		# Read data
 		df = pd.read_csv(filepath)
@@ -154,22 +139,8 @@ class Gravity:
 		'AX', 'Latitude', 'Longitude', 'Speed', 'Heading', 'VMOND', 'Year', 'Month', \
 		'Day', 'Hours', 'Minutes', 'Seconds']
 
-		format1 = lambda x: '%05.2f' % x
-		format2 = lambda x: '%02d' % x
-
-		# Determine time interval
-		seconds = df['Seconds']
-		dt = seconds[1] - seconds[0]
-
-		# Filter delay in seconds
-		delay = filterdelay * dt
-
-		print "-> Detected %0.3f second time interval." % dt
-		print "-> Using filter delay of %d samples (%0.3f s)." % (filterdelay, delay)
-
-		# Apply filter delay
-		#df['Minutes'] = df['Minutes'] + delay / 59 + np.floor((df['Seconds'] + delay % 59) / 60)
-		#df['Seconds'] = (df['Seconds'] + delay % 59) % 60
+		format1 = lambda x: '{:05.2f}'.format(x)
+		format2 = lambda x: '{:02d}'.format(x)
 
 		# Index data frame by datetime
 		time = df['Hours'].map(format2) + ":" + df['Minutes'].map(format2) + \
@@ -181,12 +152,20 @@ class Gravity:
 		# Index by datetime
 		df.index =  pd.to_datetime(date + " " + time)
 
+		# Determine time interval
+		seconds = df['Seconds']
+		dt = seconds[1] - seconds[0]
+
+		# Filter delay in seconds
+		delay = filterdelay * dt
+
+		# print "-> Detected %0.3f second time interval." % dt
+		# print "-> Using filter delay of %d samples (%0.3f s)." % (filterdelay, delay)
+
 		# Apply filter delay
 		df.index = df.index.shift(-delay, freq='S')
 
 		return df
-
-	################################
 
 	def import_pos(self, filename, interval=0):
 
