@@ -7,6 +7,8 @@ from matplotlib.backends.backend_pdf import PdfPages
 from ConfigParser import SafeConfigParser
 import datetime
 import os
+import re
+import fnmatch
 
 class Gravity:
 	# TO DO: Setup exceptions for this class.
@@ -59,7 +61,7 @@ class Gravity:
 
 	################################
 
-	def read_meter_config(self, filepath):
+	def read_DGS_meter_config(self, filepath):
 		errors = []
 
 		parser = SafeConfigParser()
@@ -93,17 +95,19 @@ class Gravity:
 		if errors:
 			raise Error(errors)
 
+	# imports a single ZLS formatted file
 	def read_ZLS_format_file(self, filepath):
-		col_names = ['line_name', 'year', 'day', 'hour', 'minute', 'second',\
-			'gravity', 'spring_tension', 'cross_coupling', 'raw_beam', 'vcc', \
-			'al', 'ax', 've2', 'ax2', 'xacc2', 'lacc2', 'xacc', 'lacc', \
-			'par_port', 'platform_period']
+		col_names = ['line_name', 'year', 'day', 'hour', 'minute', 'second',
+						'gravity', 'spring_tension', 'cross_coupling',
+						'raw_beam', 'vcc', 'al', 'ax', 've2', 'ax2', 'xacc2',
+						'lacc2', 'xacc', 'lacc', 'par_port', 'platform_period']
 
-		col_subset = ['gravity', 'spring_tension', 'cross_coupling', \
-			'raw_beam', 'vcc', 'al', 'ax', 've2', 'ax2', 'xacc2', 'lacc2', \
-			'xacc', 'lacc', 'par_port', 'platform_period']
+		col_subset = ['gravity', 'spring_tension', 'cross_coupling',
+						'raw_beam', 'vcc', 'al', 'ax', 've2', 'ax2', 'xacc2',
+						'lacc2', 'xacc', 'lacc', 'par_port', 'platform_period']
 
-		col_widths = [10, 4, 3, 2, 2, 2, 8, 8, 7, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 6]
+		col_widths = [10, 4, 3, 2, 2, 2, 8, 8, 7, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+                        8, 6]
 
 		time_columns = ['year','day','hour','minute','second']
 
@@ -120,11 +124,71 @@ class Gravity:
 
 		return df
 
-	def import_ZLS_format_data(self, filepath, begin_time=None, end_time=None):
+	# parses ZLS file names into a datetime
+	def parse_ZLS_file_name(self, filename):
+		# split by underscore
+		fname = [e.split('.') for e in filename.split('_')]
+
+		# split hour from day and then flatten into one tuple
+		b = [int(el) for fname_parts in fname for el in fname_parts]
+
+		c = datetime.datetime(b[0], 1, 1) + datetime.timedelta(days=b[2]-1,
+																hours=b[1]-1)
+
+		return c
+
+	def import_ZLS_format_data(self, dirpath, begin_time=None, end_time=None,
+								excludes=['.*']):
+
+		if begin_time is not None and not isinstance(begin_time, datetime.datetime):
+			print "Error: begin_time is not of type datetime."
+			return
+
+		if end_time is not None and not isinstance(end_time, datetime.datetime):
+			print "Error: end_time is not of type datetime."
+			return
+
+		excludes = r'|'.join([fnmatch.translate(x) for x in excludes]) or r'$.'
+
+		df = pd.DataFrame()
+
 		# list files in directory
-		# if begin_time and/or end_time are specified, filter files
-		# read each file and concatenate the resulting dataframes
-		print "import_data_ZLS_format"
+		files = [self.parse_ZLS_file_name(f) for f in os.listdir(dirpath)
+                    if os.path.isfile(os.path.join(dirpath, f))
+					if not re.match(excludes, f)]
+
+		# sort files
+		files = sorted(files)
+
+		if begin_time is None and end_time is None:
+			begin_time = files[0]
+			end_time = files[-1]
+
+		elif begin_time is None and end_time is not None:
+			# validate end_time
+			begin_time = files[0]
+			if end_time < begin_time or end_time > files[-1]:
+				print "Error: invalid end_time."
+				return
+
+		elif begin_time is not None and end_time is None:
+			# validate begin_time
+			end_time = files[-1]
+			if begin_time > end_time or begin_time < files[0]:
+				print "Error: invalid end_time."
+				return
+
+		# filter file list based on begin and end times
+		files = filter(lambda x: x > begin_time and x < end_time, files)
+
+		# convert to file names
+		files = [dt.strftime('%Y_%H.%j') for dt in files]
+
+		for f in files:
+			frame = self.read_ZLS_format_file(os.path.join(dirpath, f))
+			df = pd.concat([df, frame])
+
+		return df
 
 	def import_DGS_format_data(self, filepath, filterdelay):
 		# TO DO: Evaluate whether to apply filter delay here.
@@ -134,20 +198,21 @@ class Gravity:
 		df = pd.read_csv(filepath)
 
 		# Label columns
-		df.columns = ['QC_gravity','Gravity','Long_accel', 'Cross_accel', 'Beam', \
-		'Sensor_temp', 'Status', 'Checksum', 'Pressure', 'E_temp', 'VE', 'VCC', 'AL', \
-		'AX', 'Latitude', 'Longitude', 'Speed', 'Heading', 'VMOND', 'Year', 'Month', \
-		'Day', 'Hours', 'Minutes', 'Seconds']
+		df.columns = ['QC_gravity','Gravity','Long_accel', 'Cross_accel',
+                        'Beam', 'Sensor_temp', 'Status', 'Checksum', 'Pressure',
+                        'E_temp', 'VE', 'VCC', 'AL', 'AX', 'Latitude',
+                        'Longitude', 'Speed', 'Heading', 'VMOND', 'Year',
+                        'Month', 'Day', 'Hours', 'Minutes', 'Seconds']
 
 		format1 = lambda x: '{:05.2f}'.format(x)
 		format2 = lambda x: '{:02d}'.format(x)
 
 		# Index data frame by datetime
 		time = df['Hours'].map(format2) + ":" + df['Minutes'].map(format2) + \
-		":" + df['Seconds'].map(format1)
+                ":" + df['Seconds'].map(format1)
 
 		date = df['Month'].map(format2) + "-" + df['Day'].map(format2) + "-" + \
-		df['Year'].map(str)
+                df['Year'].map(str)
 
 		# Index by datetime
 		df.index =  pd.to_datetime(date + " " + time)
