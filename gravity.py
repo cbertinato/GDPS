@@ -15,6 +15,8 @@ class Gravity:
 
 	# Class attributes
 
+	# WGS-84
+
 	# Semi-major axis
 	_a = np.float64(6378137) # m
 
@@ -37,6 +39,12 @@ class Gravity:
 	_e2 = np.float64(0.00669438002290)
 
 	_mGal = np.float64(10e-5) # 1 mGal = 10^-5 m/s^2
+
+	# ZLS
+	_kF = np.float64(0.9899) # S-80 gravity meter scale factor
+	_kB = np.float64(30) # mGal * m/V (S-80 beam derivative factor at 1 Hz)
+	_kCA = np.float64(25.110) # mGal * m/V (S-80 cross accel scale factor)
+	_kLA = np.float64(26.483) # mGal * m/V (S-80 long accel scale factor)
 
 	_zls_file_format = {'line_name':10, 'gravity':8, 'spring_tension':8, \
 		'cross_coupling':7, 'raw_beam':8, 'vcc':8, 'al':8, 'ax':8, 've2':8, 'ax2':8, \
@@ -179,7 +187,7 @@ class Gravity:
 				return
 
 		# filter file list based on begin and end times
-		files = filter(lambda x: x > begin_time and x < end_time, files)
+		files = filter(lambda x: x >= begin_time and x < end_time, files)
 
 		# convert to file names
 		files = [dt.strftime('%Y_%H.%j') for dt in files]
