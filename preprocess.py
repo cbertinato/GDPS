@@ -1,6 +1,9 @@
+# preprocess.py
+
 import numpy as np
 import pandas as pd
 import scipy.signal as signal
+import datetime
 
 """ @brief Applies an FIR low-pass filter designed with a Blackman window.
     @param x Array of data to be filtered (array_like).
@@ -10,10 +13,22 @@ import scipy.signal as signal
 """
 def lp_filter(x, Fs, filter_len):
     # TO DO: Phase delay?
+    # TO DO: Check x type.
 
+    if not isinstance(x, pd.Series) or not isinstance(x, pd.DataFrame):
+        print "Input data set must be type Series or DataFrame"
+        return
+
+    # cutoff frequency in Hz
     Fc = 1.0/filter_len
+
+    # Nyquist frequency
     Ny = Fs/2.0
+
+    # cutoff frequency in units of the Nyquist frequency
     Wn = Fc/Ny
+
+    # filter order
     N = 2.0 * filter_len * Fs
 
     # design filter
@@ -22,6 +37,7 @@ def lp_filter(x, Fs, filter_len):
     # apply filter
     filtered_x = signal.filtfilt(taps, 1.0, x)
 
+    return filtered_x
 
 def unbiased_pf(df):
     print "unbiased_pf"
@@ -34,8 +50,10 @@ def fill_NaNs(df):
     # determine begin and end of all gaps
     # setup computation windows
 
-# NEEDS REVIEW
+# REVIEW
 def standardize(self, data):
+# Transforms input data set into one with zero mean and unit variance.
+# Z-score scaling method.
 	mean = np.mean(data)
 	std = np.std(data)
 
@@ -51,6 +69,7 @@ def standardize(self, data):
 
 	return reduced
 
+# OBSOLETE?
 def gps_leapsecond(dt):
     # dt = datetime.datetime(1980,1,6) + datetime.timedelta(weeks=wk)
 
@@ -82,8 +101,8 @@ def gps_leapsecond(dt):
 
     return leap_seconds
 
-# NEEDS REVIEW
-def gps_to_utc(self, week_num, seconds_of_week, df=None):
+# REVIEW
+def gps_to_utc(week_num, seconds_of_week, df=None):
 
     def convert_to_utc(wk, sow):
         dt = datetime.datetime(1980,1,6) + datetime.timedelta(weeks=wk)
