@@ -74,6 +74,9 @@ class Gravity:
 		# class instance trajectory dataframe
 		self.trajectory = None
 
+		self._gravity_data_path = None
+		self._trajectory_data_path = None
+
 	def read_DGS_meter_config(self, filepath):
 		errors = []
 
@@ -155,14 +158,21 @@ class Gravity:
 		return c
 
 	def import_ZLS_format_data(self, dirpath, begin_time=None, end_time=None,
-								excludes=['.*']):
+								excludes=['.*'], force_path=False):
+
+		if not os.path.isdir(dirpath):
+			print "import_ZLS_format_data : Specified path is not a directory."
+			return
+
+		if self._gravity_data_path is not None and force_path or self._gravity_data_path is None:
+			self._gravity_data_path = dirpath
 
 		if begin_time is not None and not isinstance(begin_time, datetime.datetime):
-			print "Error: begin_time is not of type datetime."
+			print "import_ZLS_format_data : begin_time is not of type datetime."
 			return
 
 		if end_time is not None and not isinstance(end_time, datetime.datetime):
-			print "Error: end_time is not of type datetime."
+			print "import_ZLS_format_data : end_time is not of type datetime."
 			return
 
 		excludes = r'|'.join([fnmatch.translate(x) for x in excludes]) or r'$.'
@@ -170,8 +180,8 @@ class Gravity:
 		df = pd.DataFrame()
 
 		# list files in directory
-		files = [self.parse_ZLS_file_name(f) for f in os.listdir(dirpath)
-                    if os.path.isfile(os.path.join(dirpath, f))
+		files = [self.parse_ZLS_file_name(f) for f in os.listdir(self._gravity_data_path)
+                    if os.path.isfile(os.path.join(self._gravity_data_path, f))
 					if not re.match(excludes, f)]
 
 		# sort files
@@ -207,7 +217,15 @@ class Gravity:
 
 		self.df = df
 
-	def import_DGS_format_data(self, filepath, interval=0, filterdelay=0):
+	def import_DGS_format_data(self, filepath, interval=0, filterdelay=0, force_path=False):
+
+		if not os.path.isfile(filepath):
+			print "import_DGS_format_data : Specified path is not a file."
+			return
+
+		if self._gravity_data_path is not None and force_path or self._gravity_data_path is None:
+			self._gravity_data_path = filepath
+
 		# Read data
 		self.df = pd.read_csv(filepath)
 
@@ -248,7 +266,16 @@ class Gravity:
 		# Apply filter delay
 		self.df.index = self.df.index.shift(-delay, freq='S')
 
-	def import_trajectory(self, filepath, interval=0, gpstime=False):
+		# TO DO: Report gaps.
+
+	def import_trajectory(self, filepath, interval=0, gpstime=False, force_path=False):
+
+		if not os.path.isfile(filepath):
+			print "import_trajectory : Specified path is not a file."
+			return
+
+		if self._trajectory_data_path is not None and force_path or self._trajectory_data_path is None:
+			self._trajectory_data_path = filepath
 
 		# TO DO: Decimate if 200 Hz trajectory?
 		self.trajectory = pd.read_csv(filepath, delim_whitespace=True, skiprows=20)
@@ -263,7 +290,8 @@ class Gravity:
 		# Shift from GPS to UTC
 		# TO DO: Calculate shift based on date of first valid time
 		if gpstime:
-			self.trajectory.index = self.trajectory.index.shift(-16, freq='S')
+			shift = pp.gps_leapsecond(self.trajectory.index[0])
+			self.trajectory.index = self.trajectory.index.shift(-shift, freq='S')
 
 		# Check time interval
 		# 	interval = 0 -> auto
@@ -283,12 +311,9 @@ class Gravity:
 			dt = interval
 			print 'Trajectory manual interval setting: {:d} seconds'.format(dt)
 
-		# TO DO: Check for gaps and interpolate.
-		# TO DO: Update to new trajectory file format.
+		# TO DO: Report gaps.
 
 	def join_grav_traj(self, df1, df2):
-
-		# print "Combining data sets."
 
 		# Add position data to main dataframe
 		df = pd.concat([df1, df2[df2.columns[2:]]], axis=1, join_axes=[df1.index])
