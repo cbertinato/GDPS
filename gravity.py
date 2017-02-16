@@ -71,6 +71,9 @@ class Gravity:
 		# class instance dataframe
 		self.df = None
 
+		# class instance trajectory dataframe
+		self.trajectory = None
+
 	def read_DGS_meter_config(self, filepath):
 		errors = []
 
@@ -220,7 +223,8 @@ class Gravity:
 		# 	interval = 0 -> auto
 		#	interval != 0 -> manual
 
-		dt = (self.df.index[1] - self.df.index[0]).microseconds * 10**(-6)
+		dt = (self.df.index[1] - self.df.index[0]).seconds + \
+			(self.df.index[1] - self.df.index[0]).microseconds * 10**(-6)
 
 		if interval == 0:
 			print 'Interval auto-detect: {:.3f} seconds'.format(dt)
@@ -244,36 +248,43 @@ class Gravity:
 		# Apply filter delay
 		self.df.index = self.df.index.shift(-delay, freq='S')
 
-	def import_trajectory(self, filename, interval=0):
+	def import_trajectory(self, filepath, interval=0, gpstime=False):
 
 		# TO DO: Decimate if 200 Hz trajectory?
-		df = pd.read_csv(filename)
+		self.trajectory = pd.read_csv(filepath, delim_whitespace=True, skiprows=20)
+
+		# Relabel columns
+		self.trajectory.columns = ['MDY','SoD','HMS','unix','Lat', 'Lon', \
+			'HEll', 'Pitch', 'Roll', 'heading', 'Num Sats', 'PDOP']
 
 		# Index by datetime
-		df.index = pd.to_datetime(df['GPS Date'] + " " + df['GPS Time'])
+		self.trajectory.index = pd.to_datetime(self.trajectory['MDY'] + " " + self.trajectory['HMS'])
 
 		# Shift from GPS to UTC
-		df.index = df.index.shift(-16, freq='S')
+		# TO DO: Calculate shift based on date of first valid time
+		if gpstime:
+			self.trajectory.index = self.trajectory.index.shift(-16, freq='S')
 
 		# Check time interval
 		# 	interval = 0 -> auto
 		#	interval != 0 -> manual
 
+		dt = (self.trajectory.index[1] - self.trajectory.index[0]).seconds + \
+			(self.trajectory.index[1] - self.trajectory.index[0]).microseconds * 10**(-6)
+
 		if interval == 0:
-			dt = (df.index[1] - df.index[0]).seconds
+			print 'Trajectory interval auto-detect: {:.3f} seconds'.format(dt)
+
 		else:
+			if dt != interval:
+				print 'Trajectory manual interval setting : Interval conflict : Detected {:d} second interval.'.format(dt)
+				return
+
 			dt = interval
+			print 'Trajectory manual interval setting: {:d} seconds'.format(dt)
 
 		# TO DO: Check for gaps and interpolate.
 		# TO DO: Update to new trajectory file format.
-
-		# Relabel columns
-		df.columns = ['Date UTC','Time UTC','Lat', 'Lon', \
-			'HEll', 'Num Sats', 'PDOP']
-
-		return df
-
-	################################
 
 	def join_grav_traj(self, df1, df2):
 
