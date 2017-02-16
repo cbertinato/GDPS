@@ -9,6 +9,7 @@ import datetime
 import os
 import re
 import fnmatch
+import preprocess as pp
 
 class Gravity:
 	# TO DO: Setup exceptions for this class.
@@ -67,7 +68,8 @@ class Gravity:
 		self.filter_length = None
 		self.filter_type = None
 
-	################################
+		# class instance dataframe
+		self.df = None
 
 	def read_DGS_meter_config(self, filepath):
 		errors = []
@@ -110,6 +112,7 @@ class Gravity:
 						'raw_beam', 'vcc', 'al', 'ax', 've2', 'ax2', 'xacc2',
 						'lacc2', 'xacc', 'lacc', 'par_port', 'platform_period']
 
+		# not currently used
 		col_subset = ['gravity', 'spring_tension', 'cross_coupling',
 						'raw_beam', 'vcc', 'al', 'ax', 've2', 'ax2', 'xacc2',
 						'lacc2', 'xacc', 'lacc', 'par_port', 'platform_period']
@@ -119,6 +122,7 @@ class Gravity:
 
 		time_columns = ['year','day','hour','minute','second']
 
+		# read into dataframe
 		df = pd.read_fwf(filepath, widths=col_widths, names=col_names)
 
 		day_fmt = lambda x: '{:03d}'.format(x)
@@ -128,6 +132,7 @@ class Gravity:
 			df['hour'].map(time_fmt) + df['minute'].map(time_fmt) + \
 			df['second'].map(time_fmt)
 
+		# index by datetime
 		df.index = pd.to_datetime(t, format='%Y%j%H%M%S')
 
 		return df
@@ -140,8 +145,9 @@ class Gravity:
 		# split hour from day and then flatten into one tuple
 		b = [int(el) for fname_parts in fname for el in fname_parts]
 
+		# generate datetime
 		c = datetime.datetime(b[0], 1, 1) + datetime.timedelta(days=b[2]-1,
-																hours=b[1]-1)
+																hours=b[1])
 
 		return c
 
@@ -196,54 +202,51 @@ class Gravity:
 			frame = self.read_ZLS_format_file(os.path.join(dirpath, f))
 			df = pd.concat([df, frame])
 
-		return df
+		self.df = df
 
-	def import_DGS_format_data(self, filepath, filterdelay):
-		# TO DO: Evaluate whether to apply filter delay here.
-		# TO DO: Is filter delay specified in meter config?
-
+	def import_DGS_format_data(self, filepath, interval=0, filterdelay=0):
 		# Read data
-		df = pd.read_csv(filepath)
+		self.df = pd.read_csv(filepath)
 
 		# Label columns
-		df.columns = ['QC_gravity','Gravity','Long_accel', 'Cross_accel',
-                        'Beam', 'Sensor_temp', 'Status', 'Checksum', 'Pressure',
-                        'E_temp', 'VE', 'VCC', 'AL', 'AX', 'Latitude',
-                        'Longitude', 'Speed', 'Heading', 'VMOND', 'Year',
-                        'Month', 'Day', 'Hours', 'Minutes', 'Seconds']
-
-		format1 = lambda x: '{:05.2f}'.format(x)
-		format2 = lambda x: '{:02d}'.format(x)
-
-		# Index data frame by datetime
-		time = df['Hours'].map(format2) + ":" + df['Minutes'].map(format2) + \
-                ":" + df['Seconds'].map(format1)
-
-		date = df['Month'].map(format2) + "-" + df['Day'].map(format2) + "-" + \
-                df['Year'].map(str)
+		self.df.columns = ['Gravity','Long_accel', 'Cross_accel', \
+                        'Beam', 'Sensor_temp', 'Status', 'Pressure', \
+                        'E_temp', 'GPS_week', 'GPS_sow']
 
 		# Index by datetime
-		df.index =  pd.to_datetime(date + " " + time)
+		self.df.index =  pp.gps_to_utc('GPS_week', 'GPS_sow', self.df)
 
-		# Determine time interval
-		seconds = df['Seconds']
-		dt = seconds[1] - seconds[0]
+		# Check time interval
+		# 	interval = 0 -> auto
+		#	interval != 0 -> manual
+
+		dt = (self.df.index[1] - self.df.index[0]).microseconds * 10**(-6)
+
+		if interval == 0:
+			print 'Interval auto-detect: {:.3f} seconds'.format(dt)
+
+		else:
+			if dt != interval:
+				print 'Manual interval setting : Interval conflict : Detected {:d} second interval.'.format(dt)
+				return
+
+			dt = interval
+			print 'Manual interval setting: {:d} seconds'.format(dt)
+
+		# fill missing values with NaN
+		# TO DO: Set resample frequency based on set interval.
+		# NOTE: Assumes 10 Hz data.
+		self.df = self.df.resample('100L')
 
 		# Filter delay in seconds
 		delay = filterdelay * dt
 
-		# print "-> Detected %0.3f second time interval." % dt
-		# print "-> Using filter delay of %d samples (%0.3f s)." % (filterdelay, delay)
-
 		# Apply filter delay
-		df.index = df.index.shift(-delay, freq='S')
+		self.df.index = self.df.index.shift(-delay, freq='S')
 
-		return df
+	def import_trajectory(self, filename, interval=0):
 
-	def import_pos(self, filename, interval=0):
-
-		print "Importing trajectory data from %s." % filename
-
+		# TO DO: Decimate if 200 Hz trajectory?
 		df = pd.read_csv(filename)
 
 		# Index by datetime
@@ -261,25 +264,26 @@ class Gravity:
 		else:
 			dt = interval
 
-		# Relabel columns
-		df.columns = ['Date UTC','Time UTC','Proc Lat', 'Proc Lon', 'Proc Ortho Hgt', \
-		'Proc Ell Ht', 'Num Sats', 'PDOP']
+		# TO DO: Check for gaps and interpolate.
+		# TO DO: Update to new trajectory file format.
 
-		print "-> Detected %0.3f second time interval." % dt
+		# Relabel columns
+		df.columns = ['Date UTC','Time UTC','Lat', 'Lon', \
+			'HEll', 'Num Sats', 'PDOP']
 
 		return df
 
 	################################
 
-	def join_grav_pos(self, df1, df2):
+	def join_grav_traj(self, df1, df2):
 
-		print "Combining data sets."
+		# print "Combining data sets."
 
 		# Add position data to main dataframe
 		df = pd.concat([df1, df2[df2.columns[2:]]], axis=1, join_axes=[df1.index])
 
 		# Drop rows where there is no position data
-		df = df[pd.notnull(df['Proc Lat'])]
+		df = df[pd.notnull(df['Lat'])]
 
 		return df
 
@@ -474,18 +478,12 @@ class Gravity:
 
 		return eotvos * _mGal
 
-	################################
-
 	def lat_correction(self, lat):
-		return -9.7803267715 * ((1 + 0.00193185138639*(np.sin(np.deg2rad(lat)))**2) \
-		/ np.sqrt(1 - 0.00669437999013*(np.sin(np.deg2rad(lat)))**2)) * _mGal
-
-	################################
+		return np.float(-9.7803267715) * ((1 + np.float(0.00193185138639)*(np.sin(np.deg2rad(lat)))**2) \
+		/ np.sqrt(1 - np.float(0.00669437999013)*(np.sin(np.deg2rad(lat)))**2)) * _mGal
 
 	def free_air_correction(self, height):
 		return 0.3086 * height * _mGal
-
-	################################
 
 	def vert_accel_correction(self, height):
 	# From SciPy.org documentation:
