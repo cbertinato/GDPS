@@ -69,13 +69,15 @@ class Gravity:
 		self.filter_type = None
 
 		# class instance dataframe
-		self.df = None
+		self.gravity = None
 
 		# class instance trajectory dataframe
 		self.trajectory = None
 
 		self._gravity_data_path = None
 		self._trajectory_data_path = None
+
+		self._sensor_type = None
 
 	def read_DGS_meter_config(self, filepath):
 		errors = []
@@ -175,6 +177,8 @@ class Gravity:
 			print "import_ZLS_format_data : end_time is not of type datetime."
 			return
 
+		self._sensor_type = 'ZLS'
+
 		excludes = r'|'.join([fnmatch.translate(x) for x in excludes]) or r'$.'
 
 		df = pd.DataFrame()
@@ -215,9 +219,10 @@ class Gravity:
 			frame = self.read_ZLS_format_file(os.path.join(dirpath, f))
 			df = pd.concat([df, frame])
 
-		self.df = df
+		self.gravity = df
 
-	def import_DGS_format_data(self, filepath, interval=0, filterdelay=0, force_path=False):
+	def import_DGS_format_data(self, filepath, interval=0, filterdelay=0,
+								force_path=False, interp=False):
 
 		if not os.path.isfile(filepath):
 			print "import_DGS_format_data : Specified path is not a file."
@@ -226,50 +231,56 @@ class Gravity:
 		if self._gravity_data_path is not None and force_path or self._gravity_data_path is None:
 			self._gravity_data_path = filepath
 
+		self._sensor_type = 'DGS'
+
 		# Read data
-		self.df = pd.read_csv(filepath)
+		self.gravity = pd.read_csv(filepath)
 
 		# Label columns
-		self.df.columns = ['Gravity','Long_accel', 'Cross_accel', \
+		self.gravity.columns = ['Gravity','Long_accel', 'Cross_accel', \
                         'Beam', 'Sensor_temp', 'Status', 'Pressure', \
                         'E_temp', 'GPS_week', 'GPS_sow']
 
 		# Index by datetime
-		self.df.index =  pp.gps_to_utc('GPS_week', 'GPS_sow', self.df)
+		self.gravity.index =  pp.gps_to_utc('GPS_week', 'GPS_sow', self.gravity)
 
 		# Check time interval
 		# 	interval = 0 -> auto
 		#	interval != 0 -> manual
-
-		dt = (self.df.index[1] - self.df.index[0]).seconds + \
-			(self.df.index[1] - self.df.index[0]).microseconds * 10**(-6)
+		# TO DO: More rigorous interval check.
+		dt = (self.gravity.index[1] - self.gravity.index[0]).seconds + \
+			(self.gravity.index[1] - self.gravity.index[0]).microseconds * 10**(-6)
 
 		if interval == 0:
-			print 'Interval auto-detect: {:.3f} seconds'.format(dt)
+			print 'import_DGS_format_data : Detected interval at {:.3f} s'.format(dt)
 
 		else:
-			if dt != interval:
-				print 'Manual interval setting : Interval conflict : Detected {:d} second interval.'.format(dt)
-				return
-
+			print 'import_DGS_format_data : Interval set to {:.3f} s'.format(interval)
 			dt = interval
-			print 'Manual interval setting: {:d} seconds'.format(dt)
 
 		# fill missing values with NaN
-		# TO DO: Set resample frequency based on set interval.
-		# NOTE: Assumes 10 Hz data.
-		self.df = self.df.resample('100L')
+		offset_str = '{:d}U'.format(int(dt * 10**6))
+		self.gravity = self.gravity.resample(offset_str)
+
+		if interp:
+			# interpolate through NaNs
+			pp.interp_nans(self.gravity['Gravity'])
+			pp.interp_nans(self.gravity['Long_accel'])
+			pp.interp_nans(self.gravity['Cross_accel'])
+			pp.interp_nans(self.gravity['Beam'])
+			print 'import_DGS_format_data : Interpolated NaNs'
 
 		# Filter delay in seconds
 		delay = filterdelay * dt
 
 		# Apply filter delay
-		self.df.index = self.df.index.shift(-delay, freq='S')
+		self.gravity.index = self.gravity.index.shift(-delay, freq='S')
 
 		# TO DO: Report gaps.
 
-	def import_trajectory(self, filepath, interval=0, gpstime=False, force_path=False):
-
+	def import_trajectory(self, filepath, interval=0, gpstime=False, force_path=False, interp=False):
+		# TO DO: Fill-in date and time data when interpolating
+		
 		if not os.path.isfile(filepath):
 			print "import_trajectory : Specified path is not a file."
 			return
@@ -282,7 +293,7 @@ class Gravity:
 
 		# Relabel columns
 		self.trajectory.columns = ['MDY','SoD','HMS','unix','Lat', 'Lon', \
-			'HEll', 'Pitch', 'Roll', 'heading', 'Num Sats', 'PDOP']
+			'HEll', 'Pitch', 'Roll', 'Heading', 'Num Sats', 'PDOP']
 
 		# Index by datetime
 		self.trajectory.index = pd.to_datetime(self.trajectory['MDY'] + " " + self.trajectory['HMS'])
@@ -301,27 +312,47 @@ class Gravity:
 			(self.trajectory.index[1] - self.trajectory.index[0]).microseconds * 10**(-6)
 
 		if interval == 0:
-			print 'Trajectory interval auto-detect: {:.3f} seconds'.format(dt)
+			print 'import_trajectory : Detected interval at {:.3f} s'.format(dt)
 
 		else:
-			if dt != interval:
-				print 'Trajectory manual interval setting : Interval conflict : Detected {:d} second interval.'.format(dt)
-				return
-
+			print 'import_trajectory : Interval set to {:.3f} s'.format(interval)
 			dt = interval
-			print 'Trajectory manual interval setting: {:d} seconds'.format(dt)
+
+		# fill missing values with NaN
+		offset_str = '{:d}U'.format(int(dt * 10**6))
+		self.trajectory = self.trajectory.resample(offset_str)
+
+		# interpolate
+		if interp:
+			pp.interp_nans(self.trajectory['Lat'])
+			pp.interp_nans(self.trajectory['Lon'])
+			pp.interp_nans(self.trajectory['HEll'])
+			pp.interp_nans(self.trajectory['Pitch'])
+			pp.interp_nans(self.trajectory['Roll'])
+			pp.interp_nans(self.trajectory['Heading'])
+			print 'import_trajectory : Interpolated NaNs'
 
 		# TO DO: Report gaps.
 
-	def join_grav_traj(self, df1, df2):
+	def join_grav_traj(self):
+		if self.gravity is None:
+			print 'join_grav_traj : Gravity data not yet imported.'
+			return
 
-		# Add position data to main dataframe
-		df = pd.concat([df1, df2[df2.columns[2:]]], axis=1, join_axes=[df1.index])
+		if self.trajectory is None:
+			print 'join_grav_traj : Trajectory not yet imported.'
+			return
+
+		# Add trajectory data to gravity dataframe
+		df = pd.concat([self.gravity, \
+			self.trajectory[self.trajectory.columns[2:]]], \
+			axis=1, join_axes=[self.gravity.index])
 
 		# Drop rows where there is no position data
-		df = df[pd.notnull(df['Lat'])]
+		# df = df[pd.notnull(df['Lat'])]
 
-		return df
+		if df.empty:
+			print 'join_grav_traj : no common data.'
 
 	################################
 
