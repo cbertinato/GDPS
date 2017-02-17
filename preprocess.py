@@ -39,6 +39,23 @@ def lp_filter(x, Fs, filter_len):
 
     return filtered_x
 
+def nan_helper(y):
+    """Helper to handle indices and logical indices of NaNs.
+
+    Input:
+        - y, 1d numpy array or pandas Series with possible NaNs.
+    Output:
+        - nans, logical indices of NaNs.
+        - index, a function with signature indices = index(logical_indices),
+            to convert logical indices of NaNs to 'equivalent' indices.
+    """
+
+    return np.isnan(y), lambda z: z.nonzero()[0]
+
+def interp_nans(y):
+    nans, x = nan_helper(y)
+    y[nans] = np.interp(x(nans), x(~nans), y[~nans])
+
 def unbiased_pf(df):
     print "unbiased_pf"
 
