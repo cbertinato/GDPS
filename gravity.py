@@ -251,15 +251,18 @@ class Gravity:
 		dt = (self.gravity.index[1] - self.gravity.index[0]).seconds + \
 			(self.gravity.index[1] - self.gravity.index[0]).microseconds * 10**(-6)
 
+		# work around for rounding down issue
+		dt = float('{:.6f}'.format(dt))
+
 		if interval == 0:
-			print 'import_DGS_format_data : Detected interval at {:.3f} s'.format(dt)
+			print 'import_DGS_format_data : Detected interval at {:.6f} s'.format(dt)
 
 		else:
 			print 'import_DGS_format_data : Interval set to {:.3f} s'.format(interval)
 			dt = interval
 
 		# fill missing values with NaN
-		offset_str = '{:d}U'.format(int(dt * 10**6))
+		offset_str = '{:d}U'.format(int(dt*10**6))
 		self.gravity = self.gravity.resample(offset_str)
 
 		if interp:
@@ -280,7 +283,7 @@ class Gravity:
 
 	def import_trajectory(self, filepath, interval=0, gpstime=False, force_path=False, interp=False):
 		# TO DO: Fill-in date and time data when interpolating
-		
+
 		if not os.path.isfile(filepath):
 			print "import_trajectory : Specified path is not a file."
 			return
@@ -320,6 +323,7 @@ class Gravity:
 
 		# fill missing values with NaN
 		offset_str = '{:d}U'.format(int(dt * 10**6))
+		print "offset_str=" + str(offset_str)
 		self.trajectory = self.trajectory.resample(offset_str)
 
 		# interpolate
@@ -353,6 +357,8 @@ class Gravity:
 
 		if df.empty:
 			print 'join_grav_traj : no common data.'
+		else:
+			self.gravity = df
 
 	################################
 
