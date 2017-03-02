@@ -255,7 +255,7 @@ class Gravity:
 		dt = float('{:.6f}'.format(dt))
 
 		if interval == 0:
-			print 'import_DGS_format_data : Detected interval at {:.6f} s'.format(dt)
+			print 'import_DGS_format_data : Detected interval at {:.3f} s'.format(dt)
 
 		else:
 			print 'import_DGS_format_data : Interval set to {:.3f} s'.format(interval)
@@ -314,6 +314,9 @@ class Gravity:
 		dt = (self.trajectory.index[1] - self.trajectory.index[0]).seconds + \
 			(self.trajectory.index[1] - self.trajectory.index[0]).microseconds * 10**(-6)
 
+		# work around for rounding down issue
+		dt = float('{:.6f}'.format(dt))
+
 		if interval == 0:
 			print 'import_trajectory : Detected interval at {:.3f} s'.format(dt)
 
@@ -323,7 +326,6 @@ class Gravity:
 
 		# fill missing values with NaN
 		offset_str = '{:d}U'.format(int(dt * 10**6))
-		print "offset_str=" + str(offset_str)
 		self.trajectory = self.trajectory.resample(offset_str)
 
 		# interpolate
@@ -353,12 +355,22 @@ class Gravity:
 			axis=1, join_axes=[self.gravity.index])
 
 		# Drop rows where there is no position data
-		# df = df[pd.notnull(df['Lat'])]
+		df = df[pd.notnull(df['Lat'])]
 
 		if df.empty:
 			print 'join_grav_traj : no common data.'
 		else:
 			self.gravity = df
+
+		dt = (self.gravity.index[1] - self.gravity.index[0]).seconds + \
+			(self.gravity.index[1] - self.gravity.index[0]).microseconds * 10**(-6)
+
+		# work around for rounding down issue
+		dt = float('{:.6f}'.format(dt))
+
+		# fill missing values with NaN
+		offset_str = '{:d}U'.format(int(dt*10**6))
+		self.gravity = self.gravity.resample(offset_str)
 
 	################################
 
