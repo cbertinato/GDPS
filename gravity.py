@@ -291,7 +291,7 @@ class Gravity:
 		if self._trajectory_data_path is not None and force_path or self._trajectory_data_path is None:
 			self._trajectory_data_path = filepath
 
-		# TO DO: Decimate if 200 Hz trajectory?
+		# TO DO: Can we make this faster?
 		self.trajectory = pd.read_csv(filepath, delim_whitespace=True, skiprows=20)
 
 		# Relabel columns
@@ -543,38 +543,43 @@ class Gravity:
 
 	################################
 
-	def eotvos_correction(self, lat, lon, height):
+	def eotvos_correction(self):
+		# TO DO: Check if Lat, Lon, and HEll exist.
 
 		# Radius of curvature of equatorial meridian
-		CN = _a / (np.sqrt(1 - _e2 * (np.sin(np.deg2rad(lat)))**2))
+		CN = self._a / (np.sqrt(1 - self._e2 * (np.sin(np.deg2rad(self.gravity['Lat'])))**2))
 
 		# Radius of curvature of prime meridian
-		CM = a * (1 - _e2) / ((1 - _e2 * (np.sin(np.deg2rad(lat)))**2)**(3/2))
+		CM = self._a * (1 - self._e2) / ((1 - self._e2 * (np.sin(np.deg2rad(self.gravity['Lat'])))**2)**(3/2))
 
 		# Easting velocity
-		VE = (CN + height)*np.cos(np.deg2rad(lat))*np.gradient(lon)
+		VE = (CN + self.gravity['HEll'])*np.cos(np.deg2rad(self.gravity['Lat']))*np.gradient(self.gravity['Lon'])
 
 		# Northing velocity
-		VN = (CM + height)*np.gradient(lat)
+		VN = (CM + self.gravity['HEll'])*np.gradient(self.gravity['Lat'])
 
-		eotvos = (VN**2 / _a) * (1 - height / _a + _f * (2 - 3 * (np.sin(np.deg2rad(lat)))**2)) + \
-		(VE**2 / _a) * (1 - height/_a - _f * (np.sin(np.deg2rad(lat)))**2) + \
-		2 * w * VE * np.cos(np.deg2rad(lat))
+		eotvos = (VN**2 / self._a) * (1 - self.gravity['HEll'] / self._a + self._f * (2 - 3 *
+			(np.sin(np.deg2rad(self.gravity['Lat'])))**2)) + \
+			(VE**2 / self._a) * (1 - self.gravity['HEll'] / self._a - \
+			self._f * (np.sin(np.deg2rad(self.gravity['Lat'])))**2) + \
+			2 * self._w * VE * np.cos(np.deg2rad(self.gravity['Lat']))
 
-		return eotvos * _mGal
+		self.gravity['Eotvos correction']  = eotvos * self._mGal
 
-	def lat_correction(self, lat):
-		return np.float(-9.7803267715) * ((1 + np.float(0.00193185138639)*(np.sin(np.deg2rad(lat)))**2) \
-		/ np.sqrt(1 - np.float(0.00669437999013)*(np.sin(np.deg2rad(lat)))**2)) * _mGal
+	def latitude_correction(self):
+		self.gravity['Latitude correction'] = np.float(-9.7803267715) * \
+			((1 + np.float(0.00193185138639)*(np.sin(np.deg2rad(self.gravity['Lat'])))**2) \
+		/ np.sqrt(1 - np.float(0.00669437999013)*(np.sin(np.deg2rad(self.gravity['Lat'])))**2)) * self._mGal
 
-	def free_air_correction(self, height):
-		return 0.3086 * height * _mGal
+	def free_air_correction(self):
+		self.gravity['Free air correction'] = 0.3086 * self.gravity['HEll'] * self._mGal
 
-	def vert_accel_correction(self, height):
+	def vert_accel_correction(self):
 	# From SciPy.org documentation:
 	# 	"The gradient is computed using second order accurate central differences in the
 	#	 interior and either first differences or second order accurate one-sides
 	#	 (forward or backwards) differences at the boundaries. The returned gradient hence
 	#	 has the same shape as the input array."
-
-		return pd.Series(np.gradient(np.gradient(height)), index=height.index) * _mGal
+		# TO DO: Necessary to call pd.Series?
+		self.gravity['Vert accel correction'] = pd.Series(np.gradient(np.gradient(self.gravity['HEll'])), \
+			index=self.gravity.index) * self._mGal
