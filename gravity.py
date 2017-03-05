@@ -10,6 +10,7 @@ import os
 import re
 import fnmatch
 import preprocess as pp
+import time
 
 class Gravity:
 	# TO DO: Setup exceptions for this class.
@@ -285,21 +286,24 @@ class Gravity:
 		# TO DO: Fill-in date and time data when interpolating
 
 		if not os.path.isfile(filepath):
-			print "import_trajectory : Specified path is not a file."
+			print "import_trajectory : specified path is not a file"
 			return
 
 		if self._trajectory_data_path is not None and force_path or self._trajectory_data_path is None:
 			self._trajectory_data_path = filepath
 
-		# TO DO: Can we make this faster?
-		self.trajectory = pd.read_csv(filepath, delim_whitespace=True, skiprows=20)
+		print "import_trajectory : reading trajectory file"
+		self.trajectory = pd.read_csv(filepath, delim_whitespace=True, \
+			header=None, engine='c', na_filter=False, skiprows=20)
 
 		# Relabel columns
 		self.trajectory.columns = ['MDY','SoD','HMS','unix','Lat', 'Lon', \
 			'HEll', 'Pitch', 'Roll', 'Heading', 'Num Sats', 'PDOP']
 
 		# Index by datetime
-		self.trajectory.index = pd.to_datetime(self.trajectory['MDY'] + " " + self.trajectory['HMS'])
+		print "import_trajectory : creating index"
+		self.trajectory.index = pd.to_datetime(self.trajectory['MDY'] + ' ' + \
+			self.trajectory['HMS'], format="%m/%d/%Y %H:%M:%S.%f")
 
 		# Shift from GPS to UTC
 		# TO DO: Calculate shift based on date of first valid time
@@ -318,13 +322,14 @@ class Gravity:
 		dt = float('{:.6f}'.format(dt))
 
 		if interval == 0:
-			print 'import_trajectory : Detected interval at {:.3f} s'.format(dt)
+			print 'import_trajectory : detected interval at {:.3f} s'.format(dt)
 
 		else:
-			print 'import_trajectory : Interval set to {:.3f} s'.format(interval)
+			print 'import_trajectory : interval set to {:.3f} s'.format(interval)
 			dt = interval
 
 		# fill missing values with NaN
+		print "import_trajectory : resampling"
 		offset_str = '{:d}U'.format(int(dt * 10**6))
 		self.trajectory = self.trajectory.resample(offset_str)
 
@@ -336,7 +341,7 @@ class Gravity:
 			pp.interp_nans(self.trajectory['Pitch'])
 			pp.interp_nans(self.trajectory['Roll'])
 			pp.interp_nans(self.trajectory['Heading'])
-			print 'import_trajectory : Interpolated NaNs'
+			print 'import_trajectory : interpolated NaNs'
 
 		# TO DO: Report gaps.
 
