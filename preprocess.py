@@ -178,3 +178,7 @@ def gps_to_utc(week_num, seconds_of_week, df=None):
 
     else:
         return convert_to_utc(week_num, seconds_of_week)
+
+def message(text):
+    st = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+    print '[' + st + '] ' + text
