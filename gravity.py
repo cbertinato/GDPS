@@ -92,7 +92,7 @@ class Gravity:
 			errors.append(str(why))
 
 		if not parser.has_section('Sensor'):
-			print "Error: DGS config file missing Sensor section."
+			pp.message("read_DGS_meter_config : config file missing Sensor section")
 			return
 
 		self.meter_model = parser.get('Sensor', 'Meter')
@@ -104,7 +104,7 @@ class Gravity:
 		self.filter_type = parser.get('Sensor', 'filtype')
 
 		if not parser.has_section('Survey'):
-			print "Error: DGS config file missing Survey section."
+			pp.message("read_DGS_meter_config : config file missing Survey section")
 			return
 
 		self.pre_static_reading = parser.get('Survey', 'PreStill')
@@ -164,18 +164,18 @@ class Gravity:
 								excludes=['.*'], force_path=False):
 
 		if not os.path.isdir(dirpath):
-			print "import_ZLS_format_data : Specified path is not a directory."
+			pp.message("import_ZLS_format_data : Specified path is not a directory")
 			return
 
 		if self._gravity_data_path is not None and force_path or self._gravity_data_path is None:
 			self._gravity_data_path = dirpath
 
 		if begin_time is not None and not isinstance(begin_time, datetime.datetime):
-			print "import_ZLS_format_data : begin_time is not of type datetime."
+			pp.message("import_ZLS_format_data : begin_time is not of type datetime")
 			return
 
 		if end_time is not None and not isinstance(end_time, datetime.datetime):
-			print "import_ZLS_format_data : end_time is not of type datetime."
+			pp.message("import_ZLS_format_data : end_time is not of type datetime")
 			return
 
 		self._sensor_type = 'ZLS'
@@ -200,14 +200,14 @@ class Gravity:
 			# validate end_time
 			begin_time = files[0]
 			if end_time < begin_time or end_time > files[-1]:
-				print "Error: invalid end_time."
+				pp.message("import_ZLS_format_data : invalid end_time")
 				return
 
 		elif begin_time is not None and end_time is None:
 			# validate begin_time
 			end_time = files[-1]
 			if begin_time > end_time or begin_time < files[0]:
-				print "Error: invalid end_time."
+				pp.message("import_ZLS_format_data : invalid end_time")
 				return
 
 		# filter file list based on begin and end times
@@ -226,7 +226,7 @@ class Gravity:
 								force_path=False, interp=False):
 
 		if not os.path.isfile(filepath):
-			print "import_DGS_format_data : Specified path is not a file."
+			pp.message("import_DGS_format_data : specified path is not a file")
 			return
 
 		if self._gravity_data_path is not None and force_path or self._gravity_data_path is None:
@@ -256,10 +256,10 @@ class Gravity:
 		dt = float('{:.6f}'.format(dt))
 
 		if interval == 0:
-			print 'import_DGS_format_data : Detected interval at {:.3f} s'.format(dt)
+			pp.message('import_DGS_format_data : detected interval at {:.3f} s'.format(dt))
 
 		else:
-			print 'import_DGS_format_data : Interval set to {:.3f} s'.format(interval)
+			pp.message('import_DGS_format_data : interval set to {:.3f} s'.format(interval))
 			dt = interval
 
 		# fill missing values with NaN
@@ -272,7 +272,7 @@ class Gravity:
 			pp.interp_nans(self.gravity['Long_accel'])
 			pp.interp_nans(self.gravity['Cross_accel'])
 			pp.interp_nans(self.gravity['Beam'])
-			print 'import_DGS_format_data : Interpolated NaNs'
+			pp.message('import_DGS_format_data : interpolated NaNs')
 
 		# Filter delay in seconds
 		delay = filterdelay * dt
@@ -286,13 +286,13 @@ class Gravity:
 		# TO DO: Fill-in date and time data when interpolating
 
 		if not os.path.isfile(filepath):
-			print "import_trajectory : specified path is not a file"
+			pp.message("import_trajectory : specified path is not a file")
 			return
 
 		if self._trajectory_data_path is not None and force_path or self._trajectory_data_path is None:
 			self._trajectory_data_path = filepath
 
-		print "import_trajectory : reading trajectory file"
+		pp.message("import_trajectory : reading trajectory file")
 		self.trajectory = pd.read_csv(filepath, delim_whitespace=True, \
 			header=None, engine='c', na_filter=False, skiprows=20)
 
@@ -301,7 +301,7 @@ class Gravity:
 			'HEll', 'Pitch', 'Roll', 'Heading', 'Num Sats', 'PDOP']
 
 		# Index by datetime
-		print "import_trajectory : creating index"
+		pp.message("import_trajectory : creating index")
 		self.trajectory.index = pd.to_datetime(self.trajectory['MDY'] + ' ' + \
 			self.trajectory['HMS'], format="%m/%d/%Y %H:%M:%S.%f")
 
@@ -322,14 +322,14 @@ class Gravity:
 		dt = float('{:.6f}'.format(dt))
 
 		if interval == 0:
-			print 'import_trajectory : detected interval at {:.3f} s'.format(dt)
+			pp.message('import_trajectory : detected interval at {:.3f} s'.format(dt))
 
 		else:
-			print 'import_trajectory : interval set to {:.3f} s'.format(interval)
+			pp.message('import_trajectory : interval set to {:.3f} s'.format(interval))
 			dt = interval
 
 		# fill missing values with NaN
-		print "import_trajectory : resampling"
+		pp.message("import_trajectory : resampling")
 		offset_str = '{:d}U'.format(int(dt * 10**6))
 		self.trajectory = self.trajectory.resample(offset_str)
 
@@ -341,17 +341,17 @@ class Gravity:
 			pp.interp_nans(self.trajectory['Pitch'])
 			pp.interp_nans(self.trajectory['Roll'])
 			pp.interp_nans(self.trajectory['Heading'])
-			print 'import_trajectory : interpolated NaNs'
+			pp.message('import_trajectory : interpolated NaNs')
 
 		# TO DO: Report gaps.
 
 	def join_grav_traj(self):
 		if self.gravity is None:
-			print 'join_grav_traj : Gravity data not yet imported.'
+			pp.message('join_grav_traj : gravity data not yet imported')
 			return
 
 		if self.trajectory is None:
-			print 'join_grav_traj : Trajectory not yet imported.'
+			pp.message('join_grav_traj : trajectory not yet imported')
 			return
 
 		# Add trajectory data to gravity dataframe
@@ -363,7 +363,7 @@ class Gravity:
 		df = df[pd.notnull(df['Lat'])]
 
 		if df.empty:
-			print 'join_grav_traj : no common data.'
+			pp.message('join_grav_traj : no common data')
 		else:
 			self.gravity = df
 
