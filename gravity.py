@@ -59,10 +59,13 @@ class Gravity:
 		self.nD = np.float64(1.11369e5) # ?
 
 		self.meter_model = None
-		self.k_factor = None
-		self.pre_static_reading = None
-		self.post_static_reading = None
-		self.gravity_tie = None
+		self._DGS_k_factor = 1.0737027
+		self._ZLS_k_factor = 0.9899
+		self._pre_static_reading = 0
+		self._post_static_reading = 0
+		self._gravity_tie = 0
+		self._drift_correction = None
+		self._sensor_offset = None
 
 		# legacy
 		self.time_shift = None
@@ -79,6 +82,33 @@ class Gravity:
 		self._trajectory_data_path = None
 
 		self._sensor_type = None
+
+	""" @brief Computes drift correction from static readings.
+	    @param None
+	    @return Sets self._drift_correction
+	"""
+	def drift_corr(self):
+		self._drift_correction = self._pre_static_reading - self._post_static_reading
+
+		# TO DO: Add offset calculation for ZLS
+		if self._sensor_type == 'DGS':
+			self._sensor_offset = self._gravity_tie - self._DGS_k_factor * /
+				self._pre_static_reading
+
+		elif self._sensor_type == 'ZLS':
+			pp.message('sensor2grav_corr : not yet implemented for ZLS-type sensor')
+
+	def set_pre_static_reading(self, reading):
+		self._pre_static_reading = reading
+		self.drift_corr()
+
+	def set_post_static_reading(self, reading):
+		self._post_static_reading = reading
+		self.drift_corr()
+
+	def set_tie_reading(self, reading):
+		self._gravity_tie = reading
+		self.drift_corr()
 
 	def read_DGS_meter_config(self, filepath):
 		errors = []
@@ -114,15 +144,25 @@ class Gravity:
 		if errors:
 			raise Error(errors)
 
+	def compute_ZLS_gravity(self):
+		if self._sensor_type == 'ZLS':
+			# beam derivative factor
+			kB = 30 # mGal*m/V
+
+			# compute beam derivative
+			self.gravity['beam_derivative'] = np.gradient(self.gravity['raw_beam'])
+
+			self.gravity['Gravity'] = self._ZLS_k_factor * \
+				(self.gravity['spring_tension'] + \
+				kB * self.gravity['beam_derivative'] + \
+				self.gravity['cross_coupling'])
+		else:
+			pp.message('compute_ZLS_gravity : not ZLS sensor-type')
+
 	# imports a single ZLS formatted file
 	def read_ZLS_format_file(self, filepath):
 		col_names = ['line_name', 'year', 'day', 'hour', 'minute', 'second',
-						'gravity', 'spring_tension', 'cross_coupling',
-						'raw_beam', 'vcc', 'al', 'ax', 've2', 'ax2', 'xacc2',
-						'lacc2', 'xacc', 'lacc', 'par_port', 'platform_period']
-
-		# not currently used
-		col_subset = ['gravity', 'spring_tension', 'cross_coupling',
+						'sensor_gravity', 'spring_tension', 'cross_coupling',
 						'raw_beam', 'vcc', 'al', 'ax', 've2', 'ax2', 'xacc2',
 						'lacc2', 'xacc', 'lacc', 'par_port', 'platform_period']
 
@@ -164,7 +204,7 @@ class Gravity:
 								excludes=['.*'], force_path=False):
 
 		if not os.path.isdir(dirpath):
-			pp.message("import_ZLS_format_data : Specified path is not a directory")
+			pp.message("import_ZLS_format_data : specified path is not a directory")
 			return
 
 		if self._gravity_data_path is not None and force_path or self._gravity_data_path is None:
@@ -238,7 +278,7 @@ class Gravity:
 		self.gravity = pd.read_csv(filepath)
 
 		# Label columns
-		self.gravity.columns = ['Gravity','Long_accel', 'Cross_accel', \
+		self.gravity.columns = ['Sensor','Long_accel', 'Cross_accel', \
                         'Beam', 'Sensor_temp', 'Status', 'Pressure', \
                         'E_temp', 'GPS_week', 'GPS_sow']
 
