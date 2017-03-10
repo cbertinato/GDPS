@@ -54,60 +54,89 @@ class Gravity:
 
 	def __init__(self):
 
-		# Conversion and calibration factors
-		self.eD = np.float64(1.11585e5) # ?
-		self.nD = np.float64(1.11369e5) # ?
+		# Conversion and calibration factors used in ZLS processing
+		self.eD = np.float64(1.11585e5)
+		self.nD = np.float64(1.11369e5)
 
-		self.meter_model = None
-		self._DGS_k_factor = 1.0737027
-		self._ZLS_k_factor = 0.9899
-		self._pre_static_reading = 0
-		self._post_static_reading = 0
-		self._gravity_tie = 0
-		self._drift_correction = None
-		self._sensor_offset = None
-
-		# legacy
-		self.time_shift = None
-		self.filter_length = None
-		self.filter_type = None
-
-		# class instance dataframe
+		# class instance dataframes
 		self.gravity = None
-
-		# class instance trajectory dataframe
 		self.trajectory = None
 
-		self._gravity_data_path = None
-		self._trajectory_data_path = None
+		# DGS k-factor: 1.0737027
+		# ZLS k-factor: 0.9899
+		self.attributes = {'k_factor' : 1,
+						   'pre_static' : 0,
+							'post_static' : 0,
+							'gravity_tie' : 0,
+							'drift_correction' : 0,
+							'sensor_offset' : 0,
+							'time_shift' : 0,
+							'gravity_data_path' : None,
+							'trajectory_data_path' : None
+							}
 
-		self._sensor_type = None
+	def store_gravity(self, filepath='gravity_store.h5'):
+		# TO DO: Deal with different Windows-style paths
+		if self.gravity is None:
+			pp.message('write_out_gravity : no gravity imported')
+			return
+
+		with pd.HDFStore(filepath) as store:
+			store['gravity'] = self.gravity
+			store.get_storer('gravity').attrs.attributes = self.attributes
+
+	def store_trajectory(self, filepath='trajectory_store.h5'):
+		# TO DO: Deal with different Windows-style paths
+		if self.trajectory is None:
+			pp.message('write_out_trajectory : no trajectory imported')
+			return
+
+		with pd.HDFStore(filepath) as store:
+			store['trajectory'] = self.trajectory
+
+	def recover_gravity(self, filepath='gravity_store.h5', force=False):
+		# TO DO: Deal with different Windows-style paths
+
+		with pd.HDFStore(filepath) as store:
+			if 'gravity' in store:
+				self.gravity = store['gravity']
+				self.attributes = store.get_storer('gravity').attrs.attributes
+
+
+	def recover_trajectory(self, filepath='trajectory_store.h5', force=False):
+		# TO DO: Deal with different Windows-style paths
+
+		with pd.HDFStore(filepath) as store:
+			if 'trajectory' in store:
+				self.trajectory = store['trajectory']
 
 	""" @brief Computes drift correction from static readings.
 	    @param None
 	    @return Sets self._drift_correction
 	"""
 	def drift_corr(self):
-		self._drift_correction = self._pre_static_reading - self._post_static_reading
+		self.attributes['drift_correction'] = self.attributes['pre_static'] - \
+			self.attributes['post_static']
 
 		# TO DO: Add offset calculation for ZLS
-		if self._sensor_type == 'DGS':
-			self._sensor_offset = self._gravity_tie - self._DGS_k_factor * /
-				self._pre_static_reading
+		if self.attributes['sensor_type'] == 'DGS':
+			self.attributes['sensor_offset'] = self.attributes['gravity_tie'] - \
+				self.attributes['k_factor'] * \
+				self.attributes['pre_static']
 
-		elif self._sensor_type == 'ZLS':
+		elif self.attributes['sensor_type'] == 'ZLS':
 			pp.message('sensor2grav_corr : not yet implemented for ZLS-type sensor')
 
 	def set_pre_static_reading(self, reading):
-		self._pre_static_reading = reading
+		self.attributes['pre_static'] = reading
 		self.drift_corr()
 
 	def set_post_static_reading(self, reading):
-		self._post_static_reading = reading
+		self.attributes['post_static'] = reading
 		self.drift_corr()
 
 	def set_tie_reading(self, reading):
-		self._gravity_tie = reading
+		self.attributes['gravity_tie'] = reading
 		self.drift_corr()
 
 	def read_DGS_meter_config(self, filepath):
@@ -137,22 +166,22 @@ class Gravity:
 			pp.message("read_DGS_meter_config : config file missing Survey section")
 			return
 
-		self.pre_static_reading = parser.get('Survey', 'PreStill')
-		self.post_static_reading = parser.get('Survey', 'PostStill')
-		self.gravity_tie = parser.get('Survey', 'TieGravity')
+		self.attributes['pre_static'] = parser.get('Survey', 'PreStill')
+		self.attributes['post_static'] = parser.get('Survey', 'PostStill')
+		self.attributes['gravity_tie'] = parser.get('Survey', 'TieGravity')
 
 		if errors:
 			raise Error(errors)
 
 	def compute_ZLS_gravity(self):
-		if self._sensor_type == 'ZLS':
+		if self.attributes['sensor_type'] == 'ZLS':
 			# beam derivative factor
 			kB = 30 # mGal*m/V
 
 			# compute beam derivative
 			self.gravity['beam_derivative'] = np.gradient(self.gravity['raw_beam'])
 
-			self.gravity['Gravity'] = self._ZLS_k_factor * \
+			self.gravity['Gravity'] = self.attributes['k_factor'] * \
 				(self.gravity['spring_tension'] + \
 				kB * self.gravity['beam_derivative'] + \
 				self.gravity['cross_coupling'])
@@ -207,8 +236,10 @@ class Gravity:
 			pp.message("import_ZLS_format_data : specified path is not a directory")
 			return
 
-		if self._gravity_data_path is not None and force_path or self._gravity_data_path is None:
-			self._gravity_data_path = dirpath
+		if self.attributes['gravity_data_path'] is not None and force_path \
+			or self.attributes['gravity_data_path'] is None:
+
+			self.attributes['gravity_data_path'] = dirpath
 
 		if begin_time is not None and not isinstance(begin_time, datetime.datetime):
 			pp.message("import_ZLS_format_data : begin_time is not of type datetime")
@@ -218,15 +249,15 @@ class Gravity:
 			pp.message("import_ZLS_format_data : end_time is not of type datetime")
 			return
 
-		self._sensor_type = 'ZLS'
+		self.attributes['sensor_type'] = 'ZLS'
 
 		excludes = r'|'.join([fnmatch.translate(x) for x in excludes]) or r'$.'
 
 		df = pd.DataFrame()
 
 		# list files in directory
-		files = [self.parse_ZLS_file_name(f) for f in os.listdir(self._gravity_data_path)
-                    if os.path.isfile(os.path.join(self._gravity_data_path, f))
+		files = [self.parse_ZLS_file_name(f) for f in os.listdir(self.attributes['gravity_data_path'])
+                    if os.path.isfile(os.path.join(self.attributes['gravity_data_path'], f))
 					if not re.match(excludes, f)]
 
 		# sort files
@@ -264,15 +295,20 @@ class Gravity:
 
 	def import_DGS_format_data(self, filepath, interval=0, filterdelay=0,
 								force_path=False, interp=False):
+		# TO DO: Set different data types non-float columns to save space.
 
 		if not os.path.isfile(filepath):
-			pp.message("import_DGS_format_data : specified path is not a file")
+			pp.message('import_DGS_format_data : specified path is not a file')
 			return
 
-		if self._gravity_data_path is not None and force_path or self._gravity_data_path is None:
-			self._gravity_data_path = filepath
+		if self.attributes['gravity_data_path'] is not None and force_path \
+			or self.attributes['gravity_data_path'] is None:
 
-		self._sensor_type = 'DGS'
+			self.attributes['gravity_data_path'] = filepath
+
+		pp.message('import_DGS_format_data : path = ' + filepath)
+
+		self.attributes['sensor_type'] = 'DGS'
 
 		# Read data
 		self.gravity = pd.read_csv(filepath)
@@ -296,15 +332,15 @@ class Gravity:
 		dt = float('{:.6f}'.format(dt))
 
 		if interval == 0:
-			pp.message('import_DGS_format_data : detected interval at {:.3f} s'.format(dt))
+			pp.message('import_DGS_format_data : detected interval {:.3f} s'.format(dt))
 
 		else:
-			pp.message('import_DGS_format_data : interval set to {:.3f} s'.format(interval))
+			pp.message('import_DGS_format_data : set interval {:.3f} s'.format(interval))
 			dt = interval
 
 		# fill missing values with NaN
 		offset_str = '{:d}U'.format(int(dt*10**6))
-		self.gravity = self.gravity.resample(offset_str)
+		self.gravity = self.gravity.resample(offset_str).mean()
 
 		if interp:
 			# interpolate through NaNs
@@ -326,13 +362,16 @@ class Gravity:
 		# TO DO: Fill-in date and time data when interpolating
 
 		if not os.path.isfile(filepath):
-			pp.message("import_trajectory : specified path is not a file")
+			pp.message('import_trajectory : specified path is not a file')
 			return
 
-		if self._trajectory_data_path is not None and force_path or self._trajectory_data_path is None:
-			self._trajectory_data_path = filepath
+		if self.attributes['trajectory_data_path'] is not None and force_path or\
+			self.attributes['trajectory_data_path'] is None:
 
-		pp.message("import_trajectory : reading trajectory file")
+			self.attributes['trajectory_data_path'] = filepath
+
+		pp.message("import_trajectory : path = " + filepath)
+
 		self.trajectory = pd.read_csv(filepath, delim_whitespace=True, \
 			header=None, engine='c', na_filter=False, skiprows=20)
 
@@ -371,7 +410,7 @@ class Gravity:
 		# fill missing values with NaN
 		pp.message("import_trajectory : resampling")
 		offset_str = '{:d}U'.format(int(dt * 10**6))
-		self.trajectory = self.trajectory.resample(offset_str)
+		self.trajectory = self.trajectory.resample(offset_str).mean()
 
 		# interpolate
 		if interp:
@@ -415,7 +454,7 @@ class Gravity:
 
 		# fill missing values with NaN
 		offset_str = '{:d}U'.format(int(dt*10**6))
-		self.gravity = self.gravity.resample(offset_str)
+		self.gravity = self.gravity.resample(offset_str).mean()
 
 	################################
 
