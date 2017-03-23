@@ -48,9 +48,57 @@ class Gravity:
 	_kCA = np.float64(25.110) # mGal * m/V (S-80 cross accel scale factor)
 	_kLA = np.float64(26.483) # mGal * m/V (S-80 long accel scale factor)
 
-	_zls_file_format = {'line_name':10, 'gravity':8, 'spring_tension':8, \
-		'cross_coupling':7, 'raw_beam':8, 'vcc':8, 'al':8, 'ax':8, 've2':8, 'ax2':8, \
-		'xacc2':8, 'lacc2':8, 'xacc':8, 'lacc':8, 'par_port':8, 'platform_per':6}
+	_dgs_col_names = {'Sensor':
+						{'order': 1, 'name': 'Sensor'},
+					  'Long_accel':
+					 	{'order': 2, 'name': 'Long_accel'},
+					  'Cross_accel':
+					  	{'order': 3, 'Cross_accel'},
+					  'Beam':
+					  	{'order': 4, 'Beam'},
+					  'Sensor_temp':
+					  	{'order': 5, 'name': 'Sensor_temp'},
+					  'Status':
+					  	{'order': 6, 'name': 'Status'},
+					  'Pressure':
+					  	{'order': 7,'name': 'Pressure'},
+					  'E_temp':
+					  	{'order': 8, 'name': 'E_temp'},
+					  'GPS_week':
+					  	{'order': 9, 'name': 'GPS_week'},
+					  'GPS_sow':
+					  	{'order': 10, 'name': 'GPS_sow'}
+					  }
+
+	_zls_col_names = {'line_name': {'order': 1, 'name': 'line_name', 'width': 10},
+					  'year': {'order': 2, 'name': 'year', 'width': 4},
+					  'day': {'order': 3, 'name': 'day', 'width': 3},
+					  'hour': {'order': 4, 'name': 'hour', 'width': 2},
+					  'minute': {'order': 5, 'name': 'minute', 'width': 2},
+					  'second': {'order': 6, 'name': 'second', 'width': 2},
+				      'sensor': {'order': 7, 'name': 'sensor', 'width': 8},
+					  'spring_tension': {'order': 8, 'name': 'spring_tension', 'width': 8},
+					  'cross_coupling': {'order': 9, 'name': 'cross_coupling', 'width': 8},
+					  'raw_beam': {'order': 10, 'name': 'raw_beam', 'width': 7},
+					  'vcc': {'order': 11, 'name': 'vcc', 'width': 8},
+					  'al': {'order': 12, 'name': 'al', 'width': 8},
+					  'ax': {'order': 13, 'name': 'ax', 'width': 8},
+					  've2': {'order': 14, 'name': 've2', 'width': 8},
+					  'ax2': {'order': 15, 'name': 'ax2', 'width': 8},
+					  'xacc2': {'order': 16, 'name': 'xacc2', 'width': 8},
+					  'lacc2': {'order': 17, 'name': 'lacc2', 'width': 8},
+					  'xacc': {'order': 18, 'name': 'xacc', 'width': 8},
+					  'lacc': {'order': 19, 'name': 'lacc', 'width': 8},
+					  'par_port': {'order': 20, 'name': 'par_port', 'width': 8},
+					  'platform_period': {'order': 21, 'name': 'platform_period', 'width': 6}
+					  }
+
+	_zls_time_cols = [_zls_col_names['year']['name'],
+					  _zls_col_names['day']['name'],
+					  _zls_col_names['hour']['name'],
+					  _zls_col_names['minute']['name'],
+					  _zls_col_names['second']['name']
+					  ]
 
 	def __init__(self):
 
