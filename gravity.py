@@ -48,14 +48,15 @@ class Gravity:
 	_kCA = np.float64(25.110) # mGal * m/V (S-80 cross accel scale factor)
 	_kLA = np.float64(26.483) # mGal * m/V (S-80 long accel scale factor)
 
+	# TO DO: Stores in JSON or YAML files?
 	_dgs_col_names = {'Sensor':
 						{'order': 1, 'name': 'Sensor'},
 					  'Long_accel':
 					 	{'order': 2, 'name': 'Long_accel'},
 					  'Cross_accel':
-					  	{'order': 3, 'Cross_accel'},
+					  	{'order': 3, 'name': 'Cross_accel'},
 					  'Beam':
-					  	{'order': 4, 'Beam'},
+					  	{'order': 4, 'name': 'Beam'},
 					  'Sensor_temp':
 					  	{'order': 5, 'name': 'Sensor_temp'},
 					  'Status':
@@ -120,11 +121,51 @@ class Gravity:
 							'sensor_offset' : 0,
 							'time_shift' : 0,
 							'gravity_data_path' : None,
-							'trajectory_data_path' : None
+							'trajectory_data_path' : None,
+							'begin_static_mean' : 0,
+							'begin_static_spread' : 0,
+							'begin_static_trend' : 0,
+							'begin_static_stdev' : 0
+							'lines' : []
 							}
 
-	def store_gravity(self, filepath='gravity_store.h5'):
-		# TO DO: Deal with different Windows-style paths
+	""" @brief Compute a mean, spread, trend, and standard deviation of the Sensor field within the given period.
+	    @param begin Start date and time in the format: YYYY-MM-DD HH:MM:SS
+		@param end End date and time
+	    @return Sets static_mean, static_spread, static_trend, static_stdev attributes
+	"""
+	def compute_static(self, begin, end):
+		if self.gravity is None:
+			pp.message('compute_static : no gravity imported')
+			return
+
+		begin_dt = datetime.datetime.strptime(begin,'%Y-%m-%d %H:%M:%S')
+		end_dt = datetime.datetime.strptime(end,'%Y-%m-%d %H:%M:%S')
+
+		# TO DO: How to convert datetime to pandas timestamp
+		if pd.Timestamp(begin_dt) > max(self.gravity.index):
+			 pp.message('compute static : static begin time is after end of data')
+			 return
+
+		if pd.Timestamp(end_dt) < min(self.gravity.index):
+			pp.message('compute static : static end time is before begin of data')
+			return
+
+		static = self.gravity[begin_dt:end_dt]['Sensor']
+
+		self.attributes['static_mean'] = static.mean()
+		self.attributes['static_spread'] = abs(static.max() - static.min())
+		self.attributes['static_trend'] = (static[len(static)-1] - static[0]) / (static.index(len(static)-1) - static.index(0))
+		self.attributes['static_stdev'] = static.std()
+
+	""" @brief Stores gravity dataframe and attributes dictionary in HDF5 file.
+	    @param filepath(optional) Path of h5 file. Default: ./gravity_store.h5
+		@param force(optional) Flag to overwrite an existing h5 file. Default: False
+	    @return None
+	"""
+	def store_gravity(self, filepath='gravity_store.h5', force=False):
+		# TO DO: Deal with Windows-style paths
+		# TO DO: Implement force flag
 		if self.gravity is None:
 			pp.message('write_out_gravity : no gravity imported')
 			return
@@ -133,8 +174,14 @@ class Gravity:
 			store['gravity'] = self.gravity
 			store.get_storer('gravity').attrs.attributes = self.attributes
 
-	def store_trajectory(self, filepath='trajectory_store.h5'):
-		# TO DO: Deal with different Windows-style paths
+	""" @brief Stores trajectory dataframe in HDF5 file.
+	    @param filepath(optional) Path of h5 file. Default: ./gravity_store.h5
+		@param force(optional) Flag to overwrite an existing h5 file. Default: False
+	    @return None
+	"""
+	def store_trajectory(self, filepath='trajectory_store.h5', force=False):
+		# TO DO: Deal with Windows-style paths
+		# TO DO: Implement force flag
 		if self.trajectory is None:
 			pp.message('write_out_trajectory : no trajectory imported')
 			return
@@ -142,18 +189,27 @@ class Gravity:
 		with pd.HDFStore(filepath) as store:
 			store['trajectory'] = self.trajectory
 
+	""" @brief Loads gravity dataframe and attributes dictionary from HDF5 file.
+	    @param filepath(optional) Path of h5 file. Default: ./gravity_store.h5
+		@param force(optional) Flag to overwrite an existing gravity dataframe and attributes dictionary. Default: False
+	    @return Sets self.gravity and self.attributes
+	"""
 	def recover_gravity(self, filepath='gravity_store.h5', force=False):
-		# TO DO: Deal with different Windows-style paths
-
+		# TO DO: Deal with Windows-style paths
+		# TO DO: Implement force flag
 		with pd.HDFStore(filepath) as store:
 			if 'gravity' in store:
 				self.gravity = store['gravity']
 				self.attributes = store.get_storer('gravity').attrs.attributes
 
-
+	""" @brief Loads trajectory dataframe from HDF5 file.
+	    @param filepath(optional) Path of h5 file. Default: ./trajectory_store.h5
+		@param force(optional) Flag to overwrite an existing trajectory dataframe. Default: False
+	    @return Sets self.trajectory
+	"""
 	def recover_trajectory(self, filepath='trajectory_store.h5', force=False):
 		# TO DO: Deal with different Windows-style paths
-
+		# TO DO: Implement force flag
 		with pd.HDFStore(filepath) as store:
 			if 'trajectory' in store:
 				self.trajectory = store['trajectory']
@@ -392,7 +448,7 @@ class Gravity:
 
 		if interp:
 			# interpolate through NaNs
-			pp.interp_nans(self.gravity['Gravity'])
+			pp.interp_nans(self.gravity['Sensor'])
 			pp.interp_nans(self.gravity['Long_accel'])
 			pp.interp_nans(self.gravity['Cross_accel'])
 			pp.interp_nans(self.gravity['Beam'])
@@ -507,8 +563,6 @@ class Gravity:
 	################################
 
 	def filter_gravity(self, df, window):
-
-		print "Filtering gravity with a window of %d seconds." % window
 
 		# Determine time interval
 		dt = (df.index[1] - df.index[0]).seconds
@@ -661,6 +715,9 @@ class Gravity:
 	################################
 
 	def lever_arm_correction(self, lat, lon, height, pitch, roll, heading, dx, dy, dz):
+		# TO DO: Validate arguments.
+		# TO DO: Adapt to use dataframe.
+
 		# Returns corrected latitude, longitude, and height
 
 		dlam = (dl*sin(radians(heading)) + dx*cos(radians(heading))) / (_eD*cos(lat))
