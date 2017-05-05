@@ -1,0 +1,7 @@
+numpy>=1.8.1
+numexpr>=2.5.2
+cython>=0.21
+six>=1.9.0
+tables
+pandas
+matplotlib
