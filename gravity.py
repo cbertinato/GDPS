@@ -125,15 +125,54 @@ class Gravity:
 							'begin_static_mean' : 0,
 							'begin_static_spread' : 0,
 							'begin_static_trend' : 0,
-							'begin_static_stdev' : 0
-							'lines' : []
+							'begin_static_stdev' : 0,
+							'lines' : dict()
 							}
+		self.lines = {}
+		# TO DO: Populate lines if lines attribute dictionary is not empty.
+		# TO DO: The same for when a gravity h5 is loaded.
+
+	""" @brief Removes a line
+		@param label Label of line to be removed.
+		@return None
+	"""
+	def remove_line(self, name):
+		self.attributes['lines'].pop(name, None)
+		self.lines.pop(name, None)
+
+	""" @brief Adds a line defined by a label, start time, and end time.
+		@param label Line label which serves as the dictionary key.
+	    @param begin Start date and time in the format: YYYY-MM-DD HH:MM:SS
+		@param end End date and time
+	    @return Adds the line data to the attributes line dictionary.
+	"""
+	# TO DO: Add option for automatic detemination of begin and end of line given constraints on cross and long accel values.
+	def add_line(self, name, begin, end):
+		begin_dt = datetime.datetime.strptime(begin,'%Y-%m-%d %H:%M:%S')
+		end_dt = datetime.datetime.strptime(end,'%Y-%m-%d %H:%M:%S')
+
+		if begin_dt > end_dt:
+			pp.message('add_line : begin time is after end time')
+			return
+
+		if pd.Timestamp(begin_dt) > max(self.gravity.index):
+			 pp.message('add_line : line begin time is after end of data')
+			 return
+
+		if pd.Timestamp(end_dt) < min(self.gravity.index):
+			pp.message('add_line : line end time is before begin of data')
+			return
+
+		# TO DO: Check whether dictionary entry already exists.
+		self.attributes['lines'][name] = (begin_dt, end_dt)
+		self.lines[name] = self.gravity[begin_dt:end_dt]
 
 	""" @brief Compute a mean, spread, trend, and standard deviation of the Sensor field within the given period.
 	    @param begin Start date and time in the format: YYYY-MM-DD HH:MM:SS
 		@param end End date and time
 	    @return Sets static_mean, static_spread, static_trend, static_stdev attributes
 	"""
+	# TO DO: Add option for automatic determination of static period given constraints on stdev, trend, etc.
 	def compute_static(self, begin, end):
 		if self.gravity is None:
 			pp.message('compute_static : no gravity imported')
@@ -142,7 +181,6 @@ class Gravity:
 		begin_dt = datetime.datetime.strptime(begin,'%Y-%m-%d %H:%M:%S')
 		end_dt = datetime.datetime.strptime(end,'%Y-%m-%d %H:%M:%S')
 
-		# TO DO: How to convert datetime to pandas timestamp
 		if pd.Timestamp(begin_dt) > max(self.gravity.index):
 			 pp.message('compute static : static begin time is after end of data')
 			 return
@@ -216,7 +254,7 @@ class Gravity:
 
 	""" @brief Computes drift correction from static readings.
 	    @param None
-	    @return Sets self._drift_correction
+	    @return Sets self.drift_correction, self.sensor_offset, and generates Sensor_corr column.
 	"""
 	def drift_corr(self):
 		self.attributes['drift_correction'] = self.attributes['pre_static'] - \
@@ -225,22 +263,42 @@ class Gravity:
 		# TO DO: Add offset calculation for ZLS
 		if self.attributes['sensor_type'] == 'DGS':
 			self.attributes['sensor_offset'] = self.attributes['gravity_tie'] - \
-				self.attributes['k_factor'] * \
-				self.attributes['pre_static']
+				self.attributes['k_factor'] * self.attributes['pre_static']
 
 		elif self.attributes['sensor_type'] == 'ZLS':
 			pp.message('sensor2grav_corr : not yet implemented for ZLS-type sensor')
 
+		# TO DO: Set time to begin after pre-static period and end before post-static
+		# TO DO: Create function linear in seconds instead?
+		drift = pd.Series(np.nan, index=self.gravity.index)
+		drift[0] = 0
+		drift[-1] = self.attributes['pre_static'] - self.attributes['post_static']
+		drift = drift.interpolate(method='time')
+
+		self.gravity['Sensor_corr'] = self.gravity['Sensor'] - drift + self.attributes['sensor_offset']
+
+	""" @brief Sets pre-survey static value
+	    @param reading Relative gravity static value.
+	    @return Sets self.attributes['pre_static']
+	"""
 	def set_pre_static_reading(self, reading):
-		self.attributes['pre_static'] = reading
+		self.attributes['pre_static'] = np.float64(reading)
 		self.drift_corr()
 
+	""" @brief Sets post-survey static value
+	    @param reading Relative gravity static value.
+	    @return Sets self.attributes['post_static']
+	"""
 	def set_post_static_reading(self, reading):
-		self.attributes['post_static'] = reading
+		self.attributes['post_static'] = np.float64(reading)
 		self.drift_corr()
 
+	""" @brief Sets gravity tie value
+	    @param reading Gravity tie value.
+	    @return Sets self.attributes['gravity_tie']
+	"""
 	def set_tie_reading(self, reading):
-		self.attributes['gravity_tie'] = reading
+		self.attributes['gravity_tie'] = np.float64(reading)
 		self.drift_corr()
 
 	def read_DGS_meter_config(self, filepath):
@@ -277,7 +335,7 @@ class Gravity:
 		if errors:
 			raise Error(errors)
 
-	def compute_ZLS_gravity(self):
+	def _compute_ZLS_gravity(self):
 		if self.attributes['sensor_type'] == 'ZLS':
 			# beam derivative factor
 			kB = 30 # mGal*m/V
@@ -285,15 +343,15 @@ class Gravity:
 			# compute beam derivative
 			self.gravity['beam_derivative'] = np.gradient(self.gravity['raw_beam'])
 
-			self.gravity['Gravity'] = self.attributes['k_factor'] * \
-				(self.gravity['spring_tension'] + \
-				kB * self.gravity['beam_derivative'] + \
-				self.gravity['cross_coupling'])
+			self.gravity['Sensor'] = (self.attributes['k_factor'] *
+									  (self.gravity['spring_tension'] +
+									   kB * self.gravity['beam_derivative'] +
+									   self.gravity['cross_coupling']))
 		else:
 			pp.message('compute_ZLS_gravity : not ZLS sensor-type')
 
 	# imports a single ZLS formatted file
-	def read_ZLS_format_file(self, filepath):
+	def _read_ZLS_format_file(self, filepath):
 		col_names = ['line_name', 'year', 'day', 'hour', 'minute', 'second',
 						'sensor_gravity', 'spring_tension', 'cross_coupling',
 						'raw_beam', 'vcc', 'al', 'ax', 've2', 'ax2', 'xacc2',
@@ -320,7 +378,7 @@ class Gravity:
 		return df
 
 	# parses ZLS file names into a datetime
-	def parse_ZLS_file_name(self, filename):
+	def _parse_ZLS_file_name(self, filename):
 		# split by underscore
 		fname = [e.split('.') for e in filename.split('_')]
 
@@ -360,7 +418,7 @@ class Gravity:
 		df = pd.DataFrame()
 
 		# list files in directory
-		files = [self.parse_ZLS_file_name(f) for f in os.listdir(self.attributes['gravity_data_path'])
+		files = [self._parse_ZLS_file_name(f) for f in os.listdir(self.attributes['gravity_data_path'])
                     if os.path.isfile(os.path.join(self.attributes['gravity_data_path'], f))
 					if not re.match(excludes, f)]
 
@@ -392,10 +450,11 @@ class Gravity:
 		files = [dt.strftime('%Y_%H.%j') for dt in files]
 
 		for f in files:
-			frame = self.read_ZLS_format_file(os.path.join(dirpath, f))
+			frame = self._read_ZLS_format_file(os.path.join(dirpath, f))
 			df = pd.concat([df, frame])
 
 		self.gravity = df
+		self._compute_ZLS_gravity()
 
 	def import_DGS_format_data(self, filepath, interval=0, filterdelay=0,
 								force_path=False, interp=False):
@@ -483,6 +542,8 @@ class Gravity:
 		self.trajectory.columns = ['MDY','SoD','HMS','unix','Lat', 'Lon', \
 			'HEll', 'Pitch', 'Roll', 'Heading', 'Num Sats', 'PDOP']
 
+		self.trajectory['Lon shift'] = abs(self.trajectory['Lon'])
+
 		# Index by datetime
 		pp.message("import_trajectory : creating index")
 		self.trajectory.index = pd.to_datetime(self.trajectory['MDY'] + ' ' + \
@@ -528,6 +589,7 @@ class Gravity:
 
 		# TO DO: Report gaps.
 
+	# TO DO: Handle join to dataframe that has already been joined with trajectory
 	def join_grav_traj(self):
 		if self.gravity is None:
 			pp.message('join_grav_traj : gravity data not yet imported')
@@ -538,6 +600,7 @@ class Gravity:
 			return
 
 		# Add trajectory data to gravity dataframe
+		# TO DO: Use merge instead?
 		df = pd.concat([self.gravity, \
 			self.trajectory[self.trajectory.columns[2:]]], \
 			axis=1, join_axes=[self.gravity.index])
@@ -560,177 +623,157 @@ class Gravity:
 		offset_str = '{:d}U'.format(int(dt*10**6))
 		self.gravity = self.gravity.resample(offset_str).mean()
 
-	################################
 
-	def filter_gravity(self, df, window):
+	# def plot_grav_qc(self, df, lines):
+	#
+	# 	# setup pdf
+	# 	pp = PdfPages('multipage.pdf')
+	#
+	# 	# iterate through rows
+	# 	for index, row in lines.iterrows():
+	#
+	# 		lineID = row['Line_ID']
+	# 		startTime = row['Start_Time']
+	# 		endTime = row['End_Time']
+	#
+	# 		print lineID
+	#
+	# 		# extract subsets
+	# 		subset = df[pd.to_datetime(startTime) : pd.to_datetime(endTime)]
+	#
+	# 		statFormat = lambda x: '%15.2f' % x
+	#
+	# 		# compute statistics
+	# 		sensorMean = statFormat(subset['Gravity'].mean())
+	# 		sensorMin = statFormat(subset['Gravity'].min())
+	# 		sensorMax = statFormat(subset['Gravity'].max())
+	# 		sensorStd = statFormat(subset['Gravity'].std())
+	#
+	# 		longAccelMean = statFormat(subset['Long_accel'].mean())
+	# 		longAccelMin = statFormat(subset['Long_accel'].min())
+	# 		longAccelMax = statFormat(subset['Long_accel'].max())
+	# 		longAccelStd = statFormat(subset['Long_accel'].std())
+	#
+	# 		crossAccelMean = statFormat(subset['Cross_accel'].mean())
+	# 		crossAccelMin = statFormat(subset['Cross_accel'].min())
+	# 		crossAccelMax = statFormat(subset['Cross_accel'].max())
+	# 		crossAccelStd = statFormat(subset['Cross_accel'].std())
+	#
+	# 		plt.rc('figure', figsize=(11,8.5))
+	#
+	# 		fig1 = plt.figure()
+	#
+	# 		fig1.text(0.02,0.02,startTime + " - " + endTime)
+	# 		fig1.text(0.75,0.02,"Line ID: " + lineID)
+	#
+	# 		x = subset.index
+	# 		xLabels = (subset['Time'].tolist())[::120]
+	#
+	# 		ax1 = fig1.add_subplot(311)
+	# 		ax1.plot(x, subset['Gravity'])
+	# 		ax1.grid(True)
+	# 		ax1.set_title('Sensor', fontsize=12)
+	# 		ax1.set_xticks(x[::120])
+	# 		ax1.set_xticklabels(xLabels)
+	# 		ax1.tick_params(axis='both', which='major', labelsize=8, right='off', top='off', \
+	# 		bottom='off', left='off')
+	# 		ax1.set_xlim(x.min(), x.max())
+	# 		#ax1.set_ylim(-20000, 20000)
+	# 		ax1.set_ylabel('mGal', fontsize=10)
+	#
+	# 		ax2 = fig1.add_subplot(312)
+	# 		ax2.plot(x, subset['Long_accel'])
+	# 		ax2.grid(True)
+	# 		ax2.set_title('Long accel', fontsize=12)
+	# 		ax2.set_xticks(x[::120])
+	# 		ax2.set_xticklabels(xLabels)
+	# 		ax2.tick_params(axis='both', which='major', labelsize=8, right='off', top='off', \
+	# 		bottom='off', left='off')
+	# 		ax2.set_xlim(x.min(), x.max())
+	# 		ax2.set_ylabel('Gal', fontsize=10)
+	#
+	# 		ax3 = fig1.add_subplot(313)
+	# 		ax3.plot(x, subset['Cross_accel'])
+	# 		ax3.grid(True)
+	# 		ax3.set_title('Cross accel', fontsize=12)
+	# 		ax3.set_xticks(x[::120])
+	# 		ax3.set_xticklabels(xLabels)
+	# 		ax3.tick_params(axis='both', which='major', labelsize=8, right='off', top='off', \
+	# 		bottom='off', left='off')
+	# 		ax3.set_xlim(x.min(), x.max())
+	# 		ax3.set_ylabel('Gal', fontsize=10)
+	# 		ax3.set_xlabel('Time (UTC)', fontsize=10)
+	#
+	# 		fig1.subplots_adjust(hspace=.5)
+	#
+	# 		fig1.savefig(pp, format='pdf')
+	# 		plt.close()
+	#
+	# 		############################# histograms #############################
+	# 		fig2 = plt.figure()
+	#
+	# 		fig2.text(0.02,0.02,startTime + " - " + endTime)
+	# 		fig2.text(0.75,0.02,"Line ID: " + lineID)
+	#
+	# 		ax1 = fig2.add_subplot(311)
+	# 		subset['Gravity'].hist(bins=100)
+	# 		ax1.set_title('Sensor', fontsize=12)
+	# 		ax1.tick_params(axis='both', which='major', labelsize=8, right='off', top='off', \
+	# 		bottom='off', left='off')
+	# 		ax1.set_xlabel('mGal', fontsize=10)
+	#
+	# 		ax1.text(0.02,0.9,'Mean: ' + sensorMean + '\nMin: ' + sensorMin + \
+	# 		'\nMax: ' + sensorMax + \
+	# 		'\nStd: ' + sensorStd, \
+	# 		ha='left', va='top', transform=ax1.transAxes, fontsize=10, bbox=dict(facecolor='white', alpha=1))
+	#
+	# 		ax2 = fig2.add_subplot(312)
+	# 		subset['Long_accel'].hist(bins=100)
+	# 		ax2.set_title('Long accel', fontsize=12)
+	# 		ax2.tick_params(axis='both', which='major', labelsize=8, right='off', top='off', \
+	# 		bottom='off', left='off')
+	# 		ax2.set_xlabel('Gal', fontsize=10)
+	#
+	# 		ax2.text(0.02,0.9,'Mean: ' + longAccelMean + '\nMin: ' + longAccelMin + \
+	# 		'\nMax: ' + longAccelMax + \
+	# 		'\nStd: ' + longAccelStd, \
+	# 		ha='left', va='top', transform=ax2.transAxes, fontsize=10, bbox=dict(facecolor='white', alpha=1))
+	#
+	# 		ax3 = fig2.add_subplot(313)
+	# 		subset['Cross_accel'].hist(bins=100)
+	# 		ax3.set_title('Cross accel', fontsize=12)
+	# 		ax3.tick_params(axis='both', which='major', labelsize=8, right='off', top='off', \
+	# 		bottom='off', left='off')
+	# 		ax3.set_xlabel('Gal', fontsize=10)
+	#
+	# 		ax3.text(0.02,0.9,'Mean: ' + crossAccelMean + '\nMin: ' + crossAccelMin + \
+	# 		'\nMax: ' + crossAccelMax + \
+	# 		'\nStd: ' + crossAccelStd, \
+	# 		ha='left', va='top', transform=ax3.transAxes, fontsize=10, bbox=dict(facecolor='white', alpha=1))
+	#
+	# 		fig2.subplots_adjust(hspace=.5)
+	#
+	# 		fig2.savefig(pp, format='pdf')
+	# 		plt.close()
+	#
+	# 	pp.close()
 
-		# Determine time interval
-		dt = (df.index[1] - df.index[0]).seconds
 
-		# Filter window in samples
-		filterwindow = window / dt
-
-		# Filter with moving average
-		fieldname = 'Corr Gravity Filtered ' + str(window)
-		df[fieldname] = pd.rolling_mean(df['Corr Gravity'], filterwindow)\
-
-		return df
-
-	################################
-
-	def plot_grav_qc(self, df, lines):
-
-		# setup pdf
-		pp = PdfPages('multipage.pdf')
-
-		# iterate through rows
-		for index, row in lines.iterrows():
-
-			lineID = row['Line_ID']
-			startTime = row['Start_Time']
-			endTime = row['End_Time']
-
-			print lineID
-
-			# extract subsets
-			subset = df[pd.to_datetime(startTime) : pd.to_datetime(endTime)]
-
-			statFormat = lambda x: '%15.2f' % x
-
-			# compute statistics
-			sensorMean = statFormat(subset['Gravity'].mean())
-			sensorMin = statFormat(subset['Gravity'].min())
-			sensorMax = statFormat(subset['Gravity'].max())
-			sensorStd = statFormat(subset['Gravity'].std())
-
-			longAccelMean = statFormat(subset['Long_accel'].mean())
-			longAccelMin = statFormat(subset['Long_accel'].min())
-			longAccelMax = statFormat(subset['Long_accel'].max())
-			longAccelStd = statFormat(subset['Long_accel'].std())
-
-			crossAccelMean = statFormat(subset['Cross_accel'].mean())
-			crossAccelMin = statFormat(subset['Cross_accel'].min())
-			crossAccelMax = statFormat(subset['Cross_accel'].max())
-			crossAccelStd = statFormat(subset['Cross_accel'].std())
-
-			plt.rc('figure', figsize=(11,8.5))
-
-			fig1 = plt.figure()
-
-			fig1.text(0.02,0.02,startTime + " - " + endTime)
-			fig1.text(0.75,0.02,"Line ID: " + lineID)
-
-			x = subset.index
-			xLabels = (subset['Time'].tolist())[::120]
-
-			ax1 = fig1.add_subplot(311)
-			ax1.plot(x, subset['Gravity'])
-			ax1.grid(True)
-			ax1.set_title('Sensor', fontsize=12)
-			ax1.set_xticks(x[::120])
-			ax1.set_xticklabels(xLabels)
-			ax1.tick_params(axis='both', which='major', labelsize=8, right='off', top='off', \
-			bottom='off', left='off')
-			ax1.set_xlim(x.min(), x.max())
-			#ax1.set_ylim(-20000, 20000)
-			ax1.set_ylabel('mGal', fontsize=10)
-
-			ax2 = fig1.add_subplot(312)
-			ax2.plot(x, subset['Long_accel'])
-			ax2.grid(True)
-			ax2.set_title('Long accel', fontsize=12)
-			ax2.set_xticks(x[::120])
-			ax2.set_xticklabels(xLabels)
-			ax2.tick_params(axis='both', which='major', labelsize=8, right='off', top='off', \
-			bottom='off', left='off')
-			ax2.set_xlim(x.min(), x.max())
-			ax2.set_ylabel('Gal', fontsize=10)
-
-			ax3 = fig1.add_subplot(313)
-			ax3.plot(x, subset['Cross_accel'])
-			ax3.grid(True)
-			ax3.set_title('Cross accel', fontsize=12)
-			ax3.set_xticks(x[::120])
-			ax3.set_xticklabels(xLabels)
-			ax3.tick_params(axis='both', which='major', labelsize=8, right='off', top='off', \
-			bottom='off', left='off')
-			ax3.set_xlim(x.min(), x.max())
-			ax3.set_ylabel('Gal', fontsize=10)
-			ax3.set_xlabel('Time (UTC)', fontsize=10)
-
-			fig1.subplots_adjust(hspace=.5)
-
-			fig1.savefig(pp, format='pdf')
-			plt.close()
-
-			############################# histograms #############################
-			fig2 = plt.figure()
-
-			fig2.text(0.02,0.02,startTime + " - " + endTime)
-			fig2.text(0.75,0.02,"Line ID: " + lineID)
-
-			ax1 = fig2.add_subplot(311)
-			subset['Gravity'].hist(bins=100)
-			ax1.set_title('Sensor', fontsize=12)
-			ax1.tick_params(axis='both', which='major', labelsize=8, right='off', top='off', \
-			bottom='off', left='off')
-			ax1.set_xlabel('mGal', fontsize=10)
-
-			ax1.text(0.02,0.9,'Mean: ' + sensorMean + '\nMin: ' + sensorMin + \
-			'\nMax: ' + sensorMax + \
-			'\nStd: ' + sensorStd, \
-			ha='left', va='top', transform=ax1.transAxes, fontsize=10, bbox=dict(facecolor='white', alpha=1))
-
-			ax2 = fig2.add_subplot(312)
-			subset['Long_accel'].hist(bins=100)
-			ax2.set_title('Long accel', fontsize=12)
-			ax2.tick_params(axis='both', which='major', labelsize=8, right='off', top='off', \
-			bottom='off', left='off')
-			ax2.set_xlabel('Gal', fontsize=10)
-
-			ax2.text(0.02,0.9,'Mean: ' + longAccelMean + '\nMin: ' + longAccelMin + \
-			'\nMax: ' + longAccelMax + \
-			'\nStd: ' + longAccelStd, \
-			ha='left', va='top', transform=ax2.transAxes, fontsize=10, bbox=dict(facecolor='white', alpha=1))
-
-			ax3 = fig2.add_subplot(313)
-			subset['Cross_accel'].hist(bins=100)
-			ax3.set_title('Cross accel', fontsize=12)
-			ax3.tick_params(axis='both', which='major', labelsize=8, right='off', top='off', \
-			bottom='off', left='off')
-			ax3.set_xlabel('Gal', fontsize=10)
-
-			ax3.text(0.02,0.9,'Mean: ' + crossAccelMean + '\nMin: ' + crossAccelMin + \
-			'\nMax: ' + crossAccelMax + \
-			'\nStd: ' + crossAccelStd, \
-			ha='left', va='top', transform=ax3.transAxes, fontsize=10, bbox=dict(facecolor='white', alpha=1))
-
-			fig2.subplots_adjust(hspace=.5)
-
-			fig2.savefig(pp, format='pdf')
-			plt.close()
-
-		pp.close()
-
-	################################
-
-	def lever_arm_correction(self, lat, lon, height, pitch, roll, heading, dx, dy, dz):
-		# TO DO: Validate arguments.
-		# TO DO: Adapt to use dataframe.
-
-		# Returns corrected latitude, longitude, and height
-
-		dlam = (dl*sin(radians(heading)) + dx*cos(radians(heading))) / (_eD*cos(lat))
-		dphi = (dl*cos(radians(heading)) - dx*sin(radians(heading))) / _nD
-		dH = dh + dl*sin(radians(pitch)) + dx*sin(radians(roll))
-
-		lam = lon + dlam
-		phi = lat + dphi
-		H = height + dH
+	# def lever_arm_correction(self, lat, lon, height, pitch, roll, heading, dx, dy, dz):
+	# 	# TO DO: Validate arguments.
+	# 	# TO DO: Adapt to use dataframe.
+	#
+	# 	# Returns corrected latitude, longitude, and height
+	#
+	# 	dlam = (dl*sin(radians(heading)) + dx*cos(radians(heading))) / (_eD*cos(lat))
+	# 	dphi = (dl*cos(radians(heading)) - dx*sin(radians(heading))) / _nD
+	# 	dH = dh + dl*sin(radians(pitch)) + dx*sin(radians(roll))
+	#
+	# 	lam = lon + dlam
+	# 	phi = lat + dphi
+	# 	H = height + dH
 
 		# (return what?)
-
-	################################
 
 	def eotvos_correction(self):
 		# TO DO: Check if Lat, Lon, and HEll exist.
@@ -742,7 +785,7 @@ class Gravity:
 		CM = self._a * (1 - self._e2) / ((1 - self._e2 * (np.sin(np.deg2rad(self.gravity['Lat'])))**2)**(3/2))
 
 		# Easting velocity
-		VE = (CN + self.gravity['HEll'])*np.cos(np.deg2rad(self.gravity['Lat']))*np.gradient(self.gravity['Lon'])
+		VE = (CN + self.gravity['HEll'])*np.cos(np.deg2rad(self.gravity['Lat']))*np.gradient(self.gravity['Lon shift'])
 
 		# Northing velocity
 		VN = (CM + self.gravity['HEll'])*np.gradient(self.gravity['Lat'])
@@ -771,4 +814,4 @@ class Gravity:
 	#	 has the same shape as the input array."
 		# TO DO: Necessary to call pd.Series?
 		self.gravity['Vert accel correction'] = pd.Series(np.gradient(np.gradient(self.gravity['HEll'])), \
-			index=self.gravity.index) * self._mGal
+			index=self.gravity.index) / self._mGal
