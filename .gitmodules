@@ -1,0 +1,3 @@
+[submodule "LongmanTide"]
+	path = LongmanTide
+	url = https://github.com/cbertinato/LongmanTide.git
