@@ -2,8 +2,8 @@
 
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_pdf import PdfPages
+# import matplotlib.pyplot as plt
+# from matplotlib.backends.backend_pdf import PdfPages
 from ConfigParser import SafeConfigParser
 import datetime
 import os
@@ -122,10 +122,6 @@ class Gravity:
 							'time_shift' : 0,
 							'gravity_data_path' : None,
 							'trajectory_data_path' : None,
-							'begin_static_mean' : 0,
-							'begin_static_spread' : 0,
-							'begin_static_trend' : 0,
-							'begin_static_stdev' : 0,
 							'lines' : dict()
 							}
 		self.lines = {}
@@ -147,9 +143,16 @@ class Gravity:
 	    @return Adds the line data to the attributes line dictionary.
 	"""
 	# TO DO: Add option for automatic detemination of begin and end of line given constraints on cross and long accel values.
-	def add_line(self, name, begin, end):
-		begin_dt = datetime.datetime.strptime(begin,'%Y-%m-%d %H:%M:%S')
-		end_dt = datetime.datetime.strptime(end,'%Y-%m-%d %H:%M:%S')
+	def add_line(self, name, begin, end, format='hms'):
+
+		if format == 'hms':
+			begin_dt = datetime.datetime.strptime(begin,'%Y-%m-%d %H:%M:%S')
+			end_dt = datetime.datetime.strptime(end,'%Y-%m-%d %H:%M:%S')
+		elif format == 'unix':
+			begin_dt = datetime.datetime.utcfromtimestamp(int(begin))
+			end_dt = datetime.datetime.utcfromtimestamp(int(end))
+		else:
+			pp.message('add_line : unsupported time format')
 
 		if begin_dt > end_dt:
 			pp.message('add_line : begin time is after end time')
@@ -191,10 +194,12 @@ class Gravity:
 
 		static = self.gravity[begin_dt:end_dt]['Sensor']
 
-		self.attributes['static_mean'] = static.mean()
-		self.attributes['static_spread'] = abs(static.max() - static.min())
-		self.attributes['static_trend'] = (static[len(static)-1] - static[0]) / (static.index(len(static)-1) - static.index(0))
-		self.attributes['static_stdev'] = static.std()
+		print 'mean = ' + str(static.mean())
+		print 'spread = ' + str(abs(static.max() - static.min()))
+		print 'trend = ' + str((static[len(static)-1] - static[0]) / (static.index[len(static)-1] - static.index[0]).total_seconds())
+		print 'std dev = ' + str(static.std())
+
+		return static.mean()
 
 	""" @brief Stores gravity dataframe and attributes dictionary in HDF5 file.
 	    @param filepath(optional) Path of h5 file. Default: ./gravity_store.h5
@@ -481,6 +486,9 @@ class Gravity:
                         'Beam', 'Sensor_temp', 'Status', 'Pressure', \
                         'E_temp', 'GPS_week', 'GPS_sow']
 
+		# drop rows where GPS week is 0
+		self.gravity = self.gravity[self.gravity['GPS_week'] != 0]
+
 		# Index by datetime
 		self.gravity.index =  pp.gps_to_utc('GPS_week', 'GPS_sow', self.gravity)
 
@@ -489,7 +497,7 @@ class Gravity:
 		#	interval != 0 -> manual
 		# TO DO: More rigorous interval check.
 		dt = (self.gravity.index[1] - self.gravity.index[0]).seconds + \
-			(self.gravity.index[1] - self.gravity.index[0]).microseconds * 10**(-6)
+			(self.gravity.index[1] - self.gravity.index[0]).microseconds * 1e-6
 
 		# work around for rounding down issue
 		dt = float('{:.6f}'.format(dt))
@@ -502,10 +510,11 @@ class Gravity:
 			dt = interval
 
 		# fill missing values with NaN
-		offset_str = '{:d}U'.format(int(dt*10**6))
+		offset_str = '{:d}U'.format(int(dt * 1e6))
 		self.gravity = self.gravity.resample(offset_str).mean()
 
 		if interp:
+			pp.message('import_DGS_format_data : interpolating')
 			# interpolate through NaNs
 			pp.interp_nans(self.gravity['Sensor'])
 			pp.interp_nans(self.gravity['Long_accel'])
@@ -539,10 +548,11 @@ class Gravity:
 			header=None, engine='c', na_filter=False, skiprows=20)
 
 		# Relabel columns
-		self.trajectory.columns = ['MDY','SoD','HMS','unix','Lat', 'Lon', \
-			'HEll', 'Pitch', 'Roll', 'Heading', 'Num Sats', 'PDOP']
+		self.trajectory.columns = ['MDY', 'HMS', 'Lat', 'Lon',
+								   'HEll', 'Pitch', 'Roll', 'Heading',
+								   'Num Sats', 'PDOP']
 
-		self.trajectory['Lon shift'] = abs(self.trajectory['Lon'])
+		# self.trajectory['Lon shift'] = abs(self.trajectory['Lon'])
 
 		# Index by datetime
 		pp.message("import_trajectory : creating index")
@@ -574,7 +584,7 @@ class Gravity:
 
 		# fill missing values with NaN
 		pp.message("import_trajectory : resampling")
-		offset_str = '{:d}U'.format(int(dt * 10**6))
+		offset_str = '{:d}U'.format(int(dt * 1e6))
 		self.trajectory = self.trajectory.resample(offset_str).mean()
 
 		# interpolate
@@ -601,11 +611,11 @@ class Gravity:
 
 		# Add trajectory data to gravity dataframe
 		# TO DO: Use merge instead?
-		df = pd.concat([self.gravity, \
-			self.trajectory[self.trajectory.columns[2:]]], \
-			axis=1, join_axes=[self.gravity.index])
+		df = pd.concat([self.gravity, self.trajectory],
+					   axis=1, join_axes=[self.gravity.index])
 
 		# Drop rows where there is no position data
+		# TO DO: Will drop static data. Do we really want to do this?
 		df = df[pd.notnull(df['Lat'])]
 
 		if df.empty:
@@ -614,13 +624,13 @@ class Gravity:
 			self.gravity = df
 
 		dt = (self.gravity.index[1] - self.gravity.index[0]).seconds + \
-			(self.gravity.index[1] - self.gravity.index[0]).microseconds * 10**(-6)
+			(self.gravity.index[1] - self.gravity.index[0]).microseconds * 1e-6
 
 		# work around for rounding down issue
 		dt = float('{:.6f}'.format(dt))
 
 		# fill missing values with NaN
-		offset_str = '{:d}U'.format(int(dt*10**6))
+		offset_str = '{:d}U'.format(int(dt * 1e6))
 		self.gravity = self.gravity.resample(offset_str).mean()
 
 
