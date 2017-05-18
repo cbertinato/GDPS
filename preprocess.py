@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import scipy.signal as signal
 import datetime
-import timeutils
+from timeutils import convert_to_utc
 
 """ @brief Applies an FIR low-pass filter designed with a Blackman window.
     @param x Array of data to be filtered (array_like).
@@ -125,7 +125,7 @@ def gps_to_utc(week_num, seconds_of_week, df=None):
         dt_list = []
 
         for (wk,sow) in zip(week_num, seconds_of_week):
-            dt_list.append(timeutils.convert_to_utc(wk, sow))
+            dt_list.append(convert_to_utc(sow, week=wk))
 
         return pd.DatetimeIndex(dt_list)
 
@@ -138,12 +138,12 @@ def gps_to_utc(week_num, seconds_of_week, df=None):
             return
 
         for index, row in df.iterrows():
-            dt_list.append(timeutils.convert_to_utc(row[week_num], row[seconds_of_week]))
+            dt_list.append(convert_to_utc(row[seconds_of_week], week=row[week_num]))
 
         return pd.DatetimeIndex(dt_list)
 
     else:
-        return convert_to_utc(week_num, seconds_of_week)
+        return convert_to_utc(seconds_of_week, week=week_num)
 
 def message(text):
     st = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
