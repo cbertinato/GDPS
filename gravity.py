@@ -11,6 +11,8 @@ import re
 import fnmatch
 import preprocess as pp
 import time
+from LongmanTide.longmantide import longmantide
+from scipy import signal, fftpack
 
 class Gravity:
 	# TO DO: Setup exceptions for this class.
@@ -47,6 +49,10 @@ class Gravity:
 	_kB = np.float64(30) # mGal * m/V (S-80 beam derivative factor at 1 Hz)
 	_kCA = np.float64(25.110) # mGal * m/V (S-80 cross accel scale factor)
 	_kLA = np.float64(26.483) # mGal * m/V (S-80 long accel scale factor)
+
+	# Conversion and calibration factors used in ZLS processing
+	_eD = np.float64(1.11585e5)
+	_nD = np.float64(1.11369e5)
 
 	# TO DO: Stores in JSON or YAML files?
 	_dgs_col_names = {'Sensor':
@@ -103,10 +109,6 @@ class Gravity:
 
 	def __init__(self):
 
-		# Conversion and calibration factors used in ZLS processing
-		self.eD = np.float64(1.11585e5)
-		self.nD = np.float64(1.11369e5)
-
 		# class instance dataframes
 		self.gravity = None
 		self.trajectory = None
@@ -122,11 +124,22 @@ class Gravity:
 							'time_shift' : 0,
 							'gravity_data_path' : None,
 							'trajectory_data_path' : None,
-							'lines' : dict()
+							'lines' : dict(),
+							'lever_arm' : [0, 0, 0]
 							}
 		self.lines = {}
 		# TO DO: Populate lines if lines attribute dictionary is not empty.
 		# TO DO: The same for when a gravity h5 is loaded.
+
+	def set_lever_arm(self, l):
+		# TO DO: Review this check. Use duck typing?
+		if not isinstance(l, list):
+			print 'set_lever_arm : argument must be list'
+
+		if len(l) != 3:
+			print 'set_lever_arm : expect length 3'
+
+		self.attributes['lever_arm'] = l
 
 	""" @brief Removes a line
 		@param label Label of line to be removed.
@@ -194,10 +207,10 @@ class Gravity:
 
 		static = self.gravity[begin_dt:end_dt]['Sensor']
 
-		print 'mean = ' + str(static.mean())
-		print 'spread = ' + str(abs(static.max() - static.min()))
-		print 'trend = ' + str((static[len(static)-1] - static[0]) / (static.index[len(static)-1] - static.index[0]).total_seconds())
-		print 'std dev = ' + str(static.std())
+		# print 'mean = ' + str(static.mean())
+		# print 'spread = ' + str(abs(static.max() - static.min()))
+		# print 'trend = ' + str((static[len(static)-1] - static[0]) / (static.index[len(static)-1] - static.index[0]).total_seconds())
+		# print 'std dev = ' + str(static.std())
 
 		return static.mean()
 
@@ -261,7 +274,7 @@ class Gravity:
 	    @param None
 	    @return Sets self.drift_correction, self.sensor_offset, and generates Sensor_corr column.
 	"""
-	def drift_corr(self):
+	def drift_correction(self):
 		self.attributes['drift_correction'] = self.attributes['pre_static'] - \
 			self.attributes['post_static']
 
@@ -271,7 +284,7 @@ class Gravity:
 				self.attributes['k_factor'] * self.attributes['pre_static']
 
 		elif self.attributes['sensor_type'] == 'ZLS':
-			pp.message('sensor2grav_corr : not yet implemented for ZLS-type sensor')
+			pp.message('drift_corr : not yet implemented for ZLS-type sensor')
 
 		# TO DO: Set time to begin after pre-static period and end before post-static
 		# TO DO: Create function linear in seconds instead?
@@ -280,7 +293,7 @@ class Gravity:
 		drift[-1] = self.attributes['pre_static'] - self.attributes['post_static']
 		drift = drift.interpolate(method='time')
 
-		self.gravity['Sensor_corr'] = self.gravity['Sensor'] - drift + self.attributes['sensor_offset']
+		self.gravity['Drift_corr'] = -drift + self.attributes['sensor_offset']
 
 	""" @brief Sets pre-survey static value
 	    @param reading Relative gravity static value.
@@ -288,7 +301,7 @@ class Gravity:
 	"""
 	def set_pre_static_reading(self, reading):
 		self.attributes['pre_static'] = np.float64(reading)
-		self.drift_corr()
+		self.drift_correction()
 
 	""" @brief Sets post-survey static value
 	    @param reading Relative gravity static value.
@@ -296,7 +309,7 @@ class Gravity:
 	"""
 	def set_post_static_reading(self, reading):
 		self.attributes['post_static'] = np.float64(reading)
-		self.drift_corr()
+		self.drift_correction()
 
 	""" @brief Sets gravity tie value
 	    @param reading Gravity tie value.
@@ -304,7 +317,7 @@ class Gravity:
 	"""
 	def set_tie_reading(self, reading):
 		self.attributes['gravity_tie'] = np.float64(reading)
-		self.drift_corr()
+		self.drift_correction()
 
 	def read_DGS_meter_config(self, filepath):
 		errors = []
@@ -769,52 +782,111 @@ class Gravity:
 	# 	pp.close()
 
 
-	# def lever_arm_correction(self, lat, lon, height, pitch, roll, heading, dx, dy, dz):
-	# 	# TO DO: Validate arguments.
-	# 	# TO DO: Adapt to use dataframe.
-	#
-	# 	# Returns corrected latitude, longitude, and height
-	#
-	# 	dlam = (dl*sin(radians(heading)) + dx*cos(radians(heading))) / (_eD*cos(lat))
-	# 	dphi = (dl*cos(radians(heading)) - dx*sin(radians(heading))) / _nD
-	# 	dH = dh + dl*sin(radians(pitch)) + dx*sin(radians(roll))
-	#
-	# 	lam = lon + dlam
-	# 	phi = lat + dphi
-	# 	H = height + dH
+	def lever_arm_correction(self):
+		# TO DO: Trigger recalculation of all corrections that depend on lat, lon, and h?
 
-		# (return what?)
+		# lever arm is measured from center of navigation to gravimeter
+		dx = self.attributes['lever_arm'][0]
+		dy = self.attributes['lever_arm'][1]
+		dz = self.attributes['lever_arm'][2]
 
-	def eotvos_correction(self):
+		lat = self._get_lat()
+		lon = self._get_lon()
+		h = self._get_h()
+
+		heading = np.deg2rad(self.gravity['Heading'])
+		pitch = np.deg2rad(self.gravity['Pitch'])
+		roll = np.deg2rad(self.gravity['Roll'])
+
+		dlam = (dy * np.sin(heading) + dx * np.cos(heading)) / (self._eD * np.cos(lat))
+		dphi = (dy * np.cos(heading) - dx * np.sin(heading)) / self._nD
+		dH = dz + dy * np.sin(pitch) + dx * np.sin(roll)
+
+		lam = lon + dlam
+		phi = lat + dphi
+		H = h + dH
+
+		self.gravity['LA_corr_Lon'] = dlam
+		self.gravity['LA_corr_Lat'] = dphi
+		self.gravity['LA_corr_HEll'] = dH
+
+	def _get_lat(self, units='rad', use_corr=True):
+		lat = self.gravity['Lat']
+		if 'LA_corr_Lat' in self.gravity and use_corr:
+			lat = lat + self.gravity['LA_corr_Lat']
+
+		if units == 'rad':
+			return np.deg2rad(lat)
+		elif units == 'deg':
+			return lat
+		else:
+			print '_get_lat : unrecognized units'
+
+	def _get_lon(self, units='rad', use_corr=True):
+		lon = self.gravity['Lon']
+		if 'LA_corr_Lon' in self.gravity and use_corr:
+			lon = self.gravity['LA_corr_Lon']
+
+		if units == 'rad':
+			return np.deg2rad(lon)
+		elif units == 'deg':
+			return lon
+		else:
+			print '_get_lon : unrecognized units'
+
+	def _get_h(self, use_corr=True):
+		h = self.gravity['HEll']
+		if 'LA_corr_HEll' in self.gravity and use_corr:
+			h = h + self.gravity['LA_corr_HEll']
+
+		return h
+
+	def eotvos_correction(self, use_corrected=True):
 		# TO DO: Check if Lat, Lon, and HEll exist.
+		lat = self._get_lat()
+		lon = self._get_lon()
+		h = self._get_h()
 
 		# Radius of curvature of equatorial meridian
-		CN = self._a / (np.sqrt(1 - self._e2 * (np.sin(np.deg2rad(self.gravity['Lat'])))**2))
+		CN = self._a / (np.sqrt(1 - self._e2 * np.sin(lat)**2))
 
 		# Radius of curvature of prime meridian
-		CM = self._a * (1 - self._e2) / ((1 - self._e2 * (np.sin(np.deg2rad(self.gravity['Lat'])))**2)**(3/2))
+		CM = self._a * (1 - self._e2) / ((1 - self._e2 * np.sin(lat)**2)**(3/2))
 
 		# Easting velocity
-		VE = (CN + self.gravity['HEll'])*np.cos(np.deg2rad(self.gravity['Lat']))*np.gradient(self.gravity['Lon shift'])
+		VE = (CN + h) * np.cos(lat) * np.gradient(lon)
 
 		# Northing velocity
-		VN = (CM + self.gravity['HEll'])*np.gradient(self.gravity['Lat'])
+		VN = (CM + h)*np.gradient(lat)
 
-		eotvos = (VN**2 / self._a) * (1 - self.gravity['HEll'] / self._a + self._f * (2 - 3 *
-			(np.sin(np.deg2rad(self.gravity['Lat'])))**2)) + \
-			(VE**2 / self._a) * (1 - self.gravity['HEll'] / self._a - \
-			self._f * (np.sin(np.deg2rad(self.gravity['Lat'])))**2) + \
-			2 * self._w * VE * np.cos(np.deg2rad(self.gravity['Lat']))
+		eotvos = ((VN**2 / self._a) * (1 - h / self._a + self._f *
+				  (2 - 3 * (np.sin(lat))**2)) + (VE**2 / self._a) *
+				  (1 - h / self._a - self._f * (np.sin(lat))**2) +
+				  2 * self._w * VE * np.cos(lat))
 
-		self.gravity['Eotvos correction']  = eotvos * self._mGal
+		self.gravity['Eotvos_corr']  = eotvos / self._mGal
 
 	def latitude_correction(self):
-		self.gravity['Latitude correction'] = np.float(-9.7803267715) * \
-			((1 + np.float(0.00193185138639)*(np.sin(np.deg2rad(self.gravity['Lat'])))**2) \
-		/ np.sqrt(1 - np.float(0.00669437999013)*(np.sin(np.deg2rad(self.gravity['Lat'])))**2)) * self._mGal
+		lat = self._get_lat()
+		lon = self._get_lon()
+		h = self._get_h()
+
+		num = 1 + np.float(0.00193185138639) * np.sin(lat)**2
+		den = np.sqrt(1 - np.float(0.00669437999013) * np.sin(lat)**2)
+
+		lat_corr = -(np.float(978032.67715) * num / den)
+
+		self.gravity['Lat_corr'] = lat_corr
 
 	def free_air_correction(self):
-		self.gravity['Free air correction'] = 0.3086 * self.gravity['HEll'] * self._mGal
+		# second-order free-air correction
+		lat = self._get_lat()
+		h = self._get_h()
+
+		sin2phi = np.sin(lat)**2
+		lin = np.float(0.3087691) - np.float(0.0004398) * sin2phi
+		quad = np.float(7.2125e-8)
+		self.gravity['FA_corr'] = (lin * h - quad * h**2)
 
 	def vert_accel_correction(self):
 	# From SciPy.org documentation:
@@ -822,6 +894,88 @@ class Gravity:
 	#	 interior and either first differences or second order accurate one-sides
 	#	 (forward or backwards) differences at the boundaries. The returned gradient hence
 	#	 has the same shape as the input array."
-		# TO DO: Necessary to call pd.Series?
-		self.gravity['Vert accel correction'] = pd.Series(np.gradient(np.gradient(self.gravity['HEll'])), \
-			index=self.gravity.index) / self._mGal
+		h = self._get_h()
+		accel = -np.gradient(np.gradient(h)) / self._mGal
+		self.gravity['VA_corr'] = pd.Series(accel, index=self.gravity.index)
+
+	def tide_correction(self):
+		lat = self._get_lat()
+		lon = self._get_lon()
+		h = self._get_h()
+
+		tide_model = longmantide.TideModel()
+		_, _, self.gravity['Tide_corr'] = tide_model.solve_longman(lat, lon,
+		    h, self.gravity.index)
+
+	def _xcorr(self, x, y):
+		A = fftpack.fft(x)
+		B = fftpack.fft(y)
+		Ar = -A.conjugate()
+		Br = -B.conjugate()
+		# corr = np.abs(fftpack.ifft(Ar*B))
+		corr = np.abs(fftpack.ifft(A*Br))
+		lag = self._find_max(corr)
+		print "lag = " + str(lag)
+		return lag
+
+	def _find_max(self, xc):
+		zero = 0
+		maxind = np.argmax(xc)
+		if maxind < 2:
+			zero = len(xc)
+			xc = np.append(xc[::-1], xc)
+			maxind = np.argmax(xc)
+
+		dm1 = np.abs(xc[maxind] - xc[maxind-1])
+		dp1 = np.abs(xc[maxind] - xc[maxind+1])
+		lags = range(len(xc))
+		if dm1 < dp1:
+			p = np.polyfit(lags[maxind-2:maxind+1], xc[maxind-2:maxind+1], 2)
+		else:
+			p = np.polyfit(lags[maxind-1:maxind+2], xc[maxind-1:maxind+2], 2)
+
+		return -p[1] / (2 * p[0]) - zero
+
+	def _shift(self, df, offset, interval):
+		# interval in seconds
+		# offset in lag units
+		offs = pd.to_timedelta(int(offset * interval * 1e6), unit='us')
+		f = df.copy()
+		f.index = f.index + offs
+		x = (pd.concat([df, f], axis=1)
+			 .sort_index()
+			 .interpolate(method='values')
+			 .reindex(df.index)
+			 .dropna(axis=0))
+		return x.ix[:,1]
+
+	def align_signals(self, name):
+		df = self.lines[name]
+		A = df['Sensor']
+		B = df['VA_corr'] + df['Eotvos_corr']
+		lag = self._xcorr(A, B)
+		A = self._shift(A, -lag, 0.1)
+		A = A.rename('Sensor_sh')
+		df = pd.concat([df, A], axis=1).dropna(axis=0)
+		self.lines[name] = df
+
+	def compute_corrections(self):
+		self.drift_correction()
+		self.lever_arm_correction()
+		self.tide_correction()
+		self.eotvos_correction()
+		self.vert_accel_correction()
+		self.free_air_correction()
+		self.latitude_correction()
+
+	def apply_corrections(self, name):
+		df = self.lines[name]
+		df['FA_anomaly'] = (df['Sensor_sh']
+							+ df['Eotvos_corr']
+							+ df['FA_corr']
+							+ df['VA_corr']
+							+ df['Lat_corr']
+							+ df['Tide_corr']
+							+ df['Drift_corr'])
+
+		self.lines[name] = df
