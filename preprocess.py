@@ -120,12 +120,12 @@ def gps_leapsecond(dt):
     return leap_seconds
 
 # REVIEW
-def gps_to_utc(week_num, seconds_of_week, df=None):
+def gps_to_utc(week_num, seconds_of_week, df=None, utc=True):
     if isinstance(week_num, pd.Series) and isinstance(seconds_of_week, pd.Series):
         dt_list = []
 
         for (wk,sow) in zip(week_num, seconds_of_week):
-            dt_list.append(convert_to_utc(sow, week=wk))
+            dt_list.append(convert_to_utc(sow, week=wk, utc=utc))
 
         return pd.DatetimeIndex(dt_list)
 
@@ -138,12 +138,12 @@ def gps_to_utc(week_num, seconds_of_week, df=None):
             return
 
         for index, row in df.iterrows():
-            dt_list.append(convert_to_utc(row[seconds_of_week], week=row[week_num]))
+            dt_list.append(convert_to_utc(row[seconds_of_week], week=row[week_num], utc=utc))
 
         return pd.DatetimeIndex(dt_list)
 
     else:
-        return convert_to_utc(seconds_of_week, week=week_num)
+        return convert_to_utc(seconds_of_week, week=week_num, utc=utc)
 
 def message(text):
     st = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
