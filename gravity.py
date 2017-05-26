@@ -13,6 +13,7 @@ import preprocess as pp
 import time
 from LongmanTide.longmantide import longmantide
 from scipy import signal, fftpack
+import os.path
 
 class Gravity:
 	# TO DO: Setup exceptions for this class.
@@ -979,3 +980,53 @@ class Gravity:
 							+ df['Drift_corr'])
 
 		self.lines[name] = df
+
+	def apply_filter(self, fieldname, length, lineid=None):
+		if lineid is None:
+			df = self.gravity
+		else:
+			df = self.lines[lineid]
+
+		newfield = '{name}_filt_{length}'.format(name=fieldname, length=length)
+		df[newfield] = pp.lp_filter(df[fieldname], 10, length)
+
+		if lineid is None:
+			self.gravity = df
+		else:
+			self.lines[lineid] = df
+
+	def write_to_csv(self, filepath, lineids, fields, separate=False,
+					 timeformat='unix', format_str=None, extension='csv'):
+		# clean off file extension if there is one
+		filename, file_ext = os.path.splitext(filepath)
+
+		if not separate:
+			combine = pd.DataFrame()
+
+		fields = ['Time', 'Line_id'] + fields
+		for line in lineids:
+			output = self.lines[line].copy()
+
+			if timeformat == 'unix':
+				timefield = output.index.astype(np.int64) / 1e9
+			elif timeformat == 'hms':
+				timefield = output.index.strftime('%Y-%m-%d %H:%M:%S.%f')
+			elif timeformat == 'custom':
+				if formatstr is None:
+					raise ValueError('Must specify format string for custom '
+									 'time format.')
+				timefield = output.index.strftime(formatstr)
+
+			linefield = pd.Series([line] * len(output.index), index=output.index)
+			output.insert(0, 'Time', timefield)
+			output.insert(1, 'Line_id', linefield)
+
+			if separate:
+				filename = '{file}_Line_{id}.{ext}'.format(file=filepath, id=line, ext=extension)
+				output.to_csv(filename, index=False, columns=fields)
+			else:
+				combine = pd.concat([combine, output])
+
+		if not separate:
+			filename = filename + '.' + extension
+			combine.to_csv(filename, index=False, columns=fields)
